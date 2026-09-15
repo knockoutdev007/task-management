@@ -371,6 +371,7 @@ document.addEventListener("change", ev => {
   if ("defdue" in ds) { cfg().defaultDueDays = Math.max(1, Number(t.value) || 7); return saveConfig(); }
   if ("cats" in ds) { cfg().categories = t.value.split(",").map(s => s.trim()).filter(Boolean); return saveConfig(); }
   if (ds.notify) { cfg().notify = cfg().notify || {}; cfg().notify[ds.notify] = t.checked; return saveConfig(); }
+  if (ds.mynotify) return saveMyNotifyPrefs({ [ds.mynotify]: t.checked });
 });
 let searchT;
 document.addEventListener("input", ev => {

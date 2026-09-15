@@ -62,6 +62,7 @@ function absorb(d) {
   if (d.breaks) S.breaks = d.breaks;
   if (d.config) S.config = Object.assign(clone(DEFAULT_CONFIG), d.config);
   if (d.notifications) S.notifications = d.notifications;
+  if (d.myNotifyPrefs) S.myNotifyPrefs = d.myNotifyPrefs;
 }
 
 async function initData() {
@@ -269,6 +270,23 @@ async function saveConfig() {
   const r = await PUT("/api/config", snapshot);
   if (!r.ok) { toast(explain(r), true); await refresh(["config"]); return false; }
   S.config = Object.assign(clone(DEFAULT_CONFIG), r.data.config);
+  render();
+  return true;
+}
+/** Opening the bell clears every unread row in one call, optimistically. */
+async function markAllNotificationsRead() {
+  const at = new Date().toISOString();
+  S.notifications.forEach(n => { if (!n.readAt) n.readAt = at; });
+  render();
+  await POST("/api/notifications/read-all");
+}
+/** A person's own override on top of the global notify defaults. */
+async function saveMyNotifyPrefs(patch) {
+  Object.assign(S.myNotifyPrefs, patch);
+  render();
+  const r = await PUT("/api/me/notify-prefs", patch);
+  if (!r.ok) { toast(explain(r), true); await GET("/api/me/notify-prefs").then(r2 => r2.ok && (S.myNotifyPrefs = r2.data.prefs)); render(); return false; }
+  S.myNotifyPrefs = r.data.prefs;
   render();
   return true;
 }

@@ -268,12 +268,9 @@ function viewSettings() {
 
       <section class="panel"><div class="panel-h"><h2>Notifications</h2></div>
         <div class="panel-b" style="display:grid;gap:5px">
-          ${[["assigned", "A task is assigned to me"], ["priority", "A priority changes"], ["dueSoon", "A deadline is approaching"], ["overdue", "A task goes overdue"],
-             ["blocked", "Someone reports a blocker"], ["comment", "Someone comments on my task"], ["reassigned", "A task is reassigned"], ["completed", "A task is completed"],
-             ["dependency", "I'm mentioned as someone who can help"], ["attachment", "Someone sends a file on my task"]]
-            .map(([k, l]) => `<label style="display:flex;gap:8px;align-items:center;font-size:12.5px">
+          ${NOTIFY_LABELS.map(([k, l]) => `<label style="display:flex;gap:8px;align-items:center;font-size:12.5px">
               <input type="checkbox" data-notify="${k}" ${(c.notify || {})[k] ? "checked" : ""}>${esc(l)}</label>`).join("")}
-          <div class="hlp">Notifications are computed from the activity log, so turning one off hides it without losing the record.</div>
+          <div class="hlp">This is the org-wide default. Anyone can override it for themselves from their Account menu.</div>
         </div></section>
 
       <section class="panel"><div class="panel-h"><h2>Projects</h2>

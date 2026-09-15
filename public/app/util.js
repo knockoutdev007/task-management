@@ -181,10 +181,19 @@ const DEFAULT_CONFIG = {
 };
 const PROGRESS_STEPS = [0, 10, 25, 50, 75, 90, 100];
 
+/** [key, label] pairs shared by the global default toggles (Settings) and
+ *  each person's own override toggles (Account) — one list, not two. */
+const NOTIFY_LABELS = [
+  ["assigned", "A task is assigned to me"], ["priority", "A priority changes"], ["dueSoon", "A deadline is approaching"],
+  ["overdue", "A task goes overdue"], ["blocked", "Someone reports a blocker"], ["comment", "Someone comments on my task"],
+  ["reassigned", "A task is reassigned"], ["completed", "A task is completed"],
+  ["dependency", "I'm mentioned as someone who can help"], ["attachment", "Someone sends a file on my task"]
+];
+
 /* --------------------------------------------------------------------- state */
 const S = {
   ready: false, connected: false, offline: false,
-  employees: [], tasks: [], projects: [], updates: [], breaks: [], notifications: [], assignQueue: [],
+  employees: [], tasks: [], projects: [], updates: [], breaks: [], notifications: [], myNotifyPrefs: {}, assignQueue: [],
   config: JSON.parse(JSON.stringify(DEFAULT_CONFIG)),
   me: null,
   view: store.get("view", "cc"),

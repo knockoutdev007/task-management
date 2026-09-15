@@ -23,4 +23,17 @@ export function mountNotifications(app, requireUser) {
     store.markAllNotificationsRead(req.user.id, new Date().toISOString());
     res.json({ ok: true });
   });
+
+  // A personal override on top of the global default (config.notify) —
+  // any signed-in person may read/write their own, never anyone else's.
+  app.get("/api/me/notify-prefs", requireUser, (req, res) => {
+    res.json({ prefs: store.getEmployeeNotifyPrefs(req.user.id) });
+  });
+
+  app.put("/api/me/notify-prefs", requireUser, (req, res) => {
+    const patch = {};
+    for (const [k, v] of Object.entries(req.body || {})) patch[k] = !!v;
+    store.setEmployeeNotifyPrefs(req.user.id, patch);
+    res.json({ prefs: store.getEmployeeNotifyPrefs(req.user.id) });
+  });
 }

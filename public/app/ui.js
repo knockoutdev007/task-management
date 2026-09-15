@@ -161,8 +161,15 @@ function paint() {
   const d = new Date();
   $("#tbDate").textContent = `${DOW[d.getDay()]} ${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
   paintWho(); paintNav();
-  const n = notifications().filter(x => dOf(x.at) && dOf(x.at).getTime() > (S.notifSeen || 0));
-  $("#notifDot").hidden = n.length === 0;
+  // Persisted feed rows track their own read_at; the synthetic overdue/due-
+  // tomorrow reminders (no server-side row) fall back to the old single
+  // "seen" timestamp, same as before this feed existed.
+  const n = notifications().filter(x => x.id ? !x.readAt : (dOf(x.at) && dOf(x.at).getTime() > (S.notifSeen || 0)));
+  const notifCount = $("#notifCount");
+  notifCount.hidden = n.length === 0;
+  notifCount.textContent = n.length > 9 ? "9+" : String(n.length);
+  $("#notifBtn").setAttribute("aria-label", n.length ? `Notifications, ${n.length} unread` : "Notifications");
+  $("#notifAria").textContent = n.length ? `${n.length} unread notification${n.length === 1 ? "" : "s"}` : "";
   $("#newTaskBtn").hidden = !S.me;
   const onBreak = S.me && openBreakFor(meId());
   $("#breakBtn").hidden = !S.me;

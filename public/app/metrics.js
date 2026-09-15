@@ -318,7 +318,7 @@ function notifications() {
     }
   });
 
-  const prefs = cfg().notify || {};
+  const prefs = { ...(cfg().notify || {}), ...(S.myNotifyPrefs || {}) };
   const seen = new Set();
   return out.filter(n => {
     const pk = PREF[n.kind];

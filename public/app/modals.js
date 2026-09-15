@@ -173,6 +173,7 @@ function pickerModal(title, tasks, action) {
 function notifModal() {
   const ns = notifications();
   S.notifSeen = Date.now(); store.set("notifSeen", S.notifSeen);
+  markAllNotificationsRead();
   return `<div class="modal" role="dialog" aria-modal="true" aria-label="Notifications">
     <div class="dh"><h2>Notifications</h2><span class="hint">${ns.length}</span><div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>
     <div class="db" style="padding:8px;display:grid;gap:5px">${ns.length ? ns.map(n => `
@@ -217,6 +218,12 @@ function accountModal() {
             <input class="inp" type="password" id="pw-new2" autocomplete="new-password"></div>
           <div id="pw-err"></div>
           <button class="btn pri" data-savepw style="justify-self:start">Update password</button>
+        </div></div>
+      <div class="panel"><div class="panel-h"><h2>Your notifications</h2></div>
+        <div class="panel-b" style="display:grid;gap:5px">
+          ${NOTIFY_LABELS.map(([k, l]) => `<label style="display:flex;gap:8px;align-items:center;font-size:12.5px">
+              <input type="checkbox" data-mynotify="${k}" ${(S.myNotifyPrefs || {})[k] !== undefined ? ((S.myNotifyPrefs || {})[k] ? "checked" : "") : ((cfg().notify || {})[k] ? "checked" : "")}>${esc(l)}</label>`).join("")}
+          <div class="hlp">Your own setting, on top of the org default. Unchecked here but on org-wide means it's off just for you.</div>
         </div></div>
     </div>
     <div class="df"><button class="btn dgr" data-logout>${icon("x")}Sign out</button>

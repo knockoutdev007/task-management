@@ -145,6 +145,7 @@ export function mountAdmin(app, requireUser, requireManager) {
     breaks: isManager(req.user) ? store.listAllBreaks() : store.listBreaks(req.user.id),
     config: store.getConfig(),
     notifications: store.listNotifications(req.user.id),
+    myNotifyPrefs: store.getEmployeeNotifyPrefs(req.user.id),
     serverTime: new Date().toISOString()
   }));
 }

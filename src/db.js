@@ -278,6 +278,23 @@ export const markNotificationRead = (id, employeeId, at) =>
 export const markAllNotificationsRead = (employeeId, at) =>
   db.prepare("UPDATE notifications SET read_at = ? WHERE employee_id = ? AND read_at IS NULL").run(at, employeeId);
 
+/** A single employee's overrides on top of the global notify defaults. */
+export const getEmployeeNotifyPrefs = employeeId => {
+  const out = {};
+  for (const r of db.prepare("SELECT key, value FROM employee_notify_prefs WHERE employee_id = ?").all(employeeId)) {
+    out[r.key] = !!r.value;
+  }
+  return out;
+};
+export function setEmployeeNotifyPrefs(employeeId, patch) {
+  const ts = now();
+  const stmt = db.prepare(`
+    INSERT INTO employee_notify_prefs (employee_id, key, value, updated_at) VALUES (?,?,?,?)
+    ON CONFLICT(employee_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `);
+  for (const [key, value] of Object.entries(patch || {})) stmt.run(employeeId, key, value ? 1 : 0, ts);
+}
+
 export function nextTaskId() {
   const row = db.prepare("SELECT id FROM tasks WHERE id LIKE 'TSK-%' ORDER BY id DESC LIMIT 1").get();
   const n = row ? Number(String(row.id).slice(4)) : 0;

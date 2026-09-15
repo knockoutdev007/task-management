@@ -152,6 +152,14 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_employee ON notifications(employee_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread   ON notifications(employee_id, read_at);
 
+CREATE TABLE IF NOT EXISTS employee_notify_prefs (
+  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  key         TEXT NOT NULL,
+  value       INTEGER NOT NULL,
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (employee_id, key)
+);
+
 CREATE TABLE IF NOT EXISTS config (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,                 -- JSON
