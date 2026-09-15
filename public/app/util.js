@@ -204,6 +204,7 @@ const S = {
   boardFilter: { assignee: "", project: "" },
   openTask: null,
   analyticsWeek: 0,
+  dayBoardOffset: 0,
   empDetail: null,
   projDetail: null,
   notifSeen: store.get("notifSeen", 0)
@@ -228,3 +229,14 @@ function teamName(deptId, teamId) {
 const allTeams = () => cfg().departments.flatMap(d => (d.teams || []).map(t => ({ ...t, deptId: d.id, deptName: d.name })));
 const isManager = () => !!S.me && S.me.role === "manager";
 const meId = () => S.me ? S.me.id : null;
+
+/** A day plan is a short checklist, stored as JSON inside daily_updates.current
+ *  (no schema change — matches how tasks already stash tags/blocker/links as
+ *  JSON in a TEXT column). A plain-string `current` from before checklists
+ *  existed becomes a single legacy item, so nothing old breaks. */
+function planItems(u) {
+  const raw = (u && u.current) || "";
+  if (!raw) return [];
+  try { const v = JSON.parse(raw); if (Array.isArray(v)) return v; } catch {}
+  return [{ id: "legacy", text: raw, done: false }];
+}

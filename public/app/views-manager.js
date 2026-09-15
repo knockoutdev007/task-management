@@ -146,6 +146,7 @@ function workCard(e, n) {
     <div class="wc-h">${av(e)}<div style="min-width:0"><div class="nm">${esc(e.name)}</div><div class="ro">${esc(e.title || "")}</div></div>
       <span style="margin-left:auto;display:flex;gap:6px;align-items:center">${breakBadge}${wlBadge(w)}</span></div>
     <div class="wc-b">
+      <div style="font-size:11.5px;color:var(--ink-4);margin-bottom:4px">${w.active} task${w.active === 1 ? "" : "s"} open${w.dueToday ? ` · ${w.dueToday} due today` : ""}</div>
       <div class="tt">${taskLink(t)}</div>
       <dl class="kv">
         <dt>Priority</dt><dd>${pPill(t.priority)}</dd>
@@ -158,7 +159,8 @@ function workCard(e, n) {
         <dt>Next action</dt><dd>${esc(next)}</dd>
       </dl>
       ${cur.length > 1 ? `<div class="more">Also open: ${cur.slice(1).map(x => `${pPill(x.priority)} ${esc(x.title)}`).join(" · ")}</div>` : ""}
-      ${upd && upd.date === todayISO() && upd.next ? `<div class="more">Said today: “${esc(upd.next)}”</div>` : ""}
+      ${(() => { if (!upd || upd.date !== todayISO()) return ""; const items = planItems(upd); const open = items.find(it => !it.done);
+        return items.length ? `<div class="more">Said today: “${esc((open || items[items.length - 1]).text)}”${open ? "" : " (all done)"}</div>` : ""; })()}
     </div>
   </article>`;
 }

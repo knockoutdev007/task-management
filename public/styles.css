@@ -286,6 +286,8 @@ a { color: var(--accent); }
 .btn.dgr:hover { background: var(--crit-soft); color: var(--crit); border-color: var(--crit); }
 .btn.on { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); font-weight: 600; }
 .btn.on:hover { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+#breakBtn:not(.on) { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line); font-weight: 600; }
+#breakBtn:not(.on):hover { background: var(--ok-soft); color: var(--ok); border-color: var(--ok); }
 .btn.sm { padding: 3px 8px; font-size: 11.5px; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 

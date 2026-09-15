@@ -326,6 +326,12 @@ async function saveDailyUpdate(entry) {
   render();
   return true;
 }
+/** Every add/tick/remove on the day-plan checklist saves immediately — no
+ *  separate "post" step, so ticking something off reflects right away. */
+const savePlanItems = items => saveDailyUpdate({
+  date: todayISO(), at: nowISO(), current: JSON.stringify(items),
+  completed: "", next: "", blocked: "", help: "", note: ""
+});
 async function bulkUpdate(ids, patch, note) {
   const r = await POST("/api/tasks/bulk", { ids, patch, note });
   if (!r.ok) { toast(explain(r), true); return null; }

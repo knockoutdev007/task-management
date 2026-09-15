@@ -1,50 +1,41 @@
 "use strict";
 /* ==========================================================================
-   VIEW · DAILY UPDATE (employee, 6 fields, nothing more)
+   VIEW · DAILY UPDATE (employee, a short checklist for today)
    ========================================================================== */
 function viewUpdate() {
   const id = meId();
   const today = todayISO();
   const existing = myUpdates(id).find(u => u.date === today) || {};
+  const items = planItems(existing);
   const mine = S.tasks.filter(t => t.assigneeId === id);
   const doneToday = mine.filter(t => t.status === "COMPLETED" && (t.completedAt || "").slice(0, 10) === today);
-  const onNow = mine.filter(t => t.status === "IN_PROGRESS");
-  const blocked = mine.filter(t => isActive(t) && flags(t).blocked);
   const past = myUpdates(id).slice(-6).reverse();
   return `
   <div class="ph"><div><h1>Today's update</h1>
-    <div class="sub">Six short answers. Faster than typing it into chat, and it lands where your manager already looks.</div></div></div>
+    <div class="sub">Add what you're doing today as a short list, and tick items off as you finish — saved as you go.</div></div></div>
   <div class="cc-grid">
     <section class="panel">
       <div class="panel-h"><h2>${esc(fmtDate(today, { absolute: true }))}</h2>${existing.at ? `<span class="hint">last saved ${esc(fmtAgo(existing.at))}</span>` : ""}</div>
-      <div class="panel-b" style="display:grid;gap:12px">
-        ${doneToday.length ? `<div class="note-box"><h4>Already recorded from your tasks today</h4>${doneToday.map(t => `• ${esc(t.title)}`).join("<br>")}<br><button class="btn sm" data-prefill="completed" style="margin-top:6px">Use as my answer</button></div>` : ""}
-        <div class="field"><label for="u-completed">1 · What did you complete today?</label>
-          <textarea class="inp" id="u-completed" rows="2" placeholder="Short list is fine.">${esc(existing.completed || "")}</textarea></div>
-        <div class="field"><label for="u-current">2 · What are you working on now?</label>
-          <textarea class="inp" id="u-current" rows="2" placeholder="${esc(onNow.map(t => t.title).join("; ") || "The task in front of you.")}">${esc(existing.current || "")}</textarea></div>
-        <div class="field"><label for="u-next">3 · What's next?</label>
-          <textarea class="inp" id="u-next" rows="2">${esc(existing.next || "")}</textarea></div>
-        <div class="field"><label for="u-blocked">4 · Anything blocked?</label>
-          <textarea class="inp" id="u-blocked" rows="2" placeholder="${blocked.length ? esc(blocked.map(t => t.title).join("; ")) : "Leave empty if not."}">${esc(existing.blocked || "")}</textarea>
-          ${blocked.length ? `<div class="hlp">You have ${blocked.length} task${blocked.length === 1 ? "" : "s"} already flagged as blocked — those show on the manager's board regardless.</div>` : ""}</div>
-        <div class="field"><label for="u-help">5 · Do you need help from anyone?</label>
-          <input class="inp" id="u-help" value="${esc(existing.help || "")}" placeholder="Name the person and what you need."></div>
-        <div class="field"><label for="u-note">6 · Anything else worth flagging?</label>
-          <input class="inp" id="u-note" value="${esc(existing.note || "")}" placeholder="Optional."></div>
-      </div>
-      <div class="df" style="border-radius:0 0 var(--r-lg) var(--r-lg)">
-        <span class="hlp">Saved to the shared board — your manager sees it on the daily summary.</span>
-        <div class="sp"><button class="btn pri" data-saveupdate>${icon("check")}${existing.at ? "Update" : "Post"} today's update</button></div>
+      <div class="panel-b" style="display:grid;gap:8px">
+        ${doneToday.length ? `<div class="note-box"><h4>Already recorded from your tasks today</h4>${doneToday.map(t => `• ${esc(t.title)}`).join("<br>")}<br><button class="btn sm" data-prefillplan style="margin-top:6px">Add these as items</button></div>` : ""}
+        <div style="display:grid;gap:4px">
+          ${items.length ? items.map(it => `<div class="sr-item" style="width:100%">
+            <button class="iconbtn" data-toggleplan="${esc(it.id)}" aria-label="${it.done ? "Mark not done" : "Mark done"}" style="width:24px;height:24px;flex:none">${it.done ? icon("check") : ""}</button>
+            <span style="flex:1;font-size:13px;min-width:0;overflow-wrap:anywhere;${it.done ? "text-decoration:line-through;color:var(--ink-4)" : ""}">${esc(it.text)}</span>
+            <button class="iconbtn" data-delplan="${esc(it.id)}" aria-label="Remove" style="width:24px;height:24px;flex:none">${icon("x")}</button>
+          </div>`).join("") : emptyState("Nothing added yet", "Add your first item below.")}
+        </div>
+        <div style="display:flex;gap:8px">
+          <input class="inp" id="u-newitem" placeholder="Add something you're doing today…" style="flex:1">
+          <button class="btn" data-addplan>${icon("plus")}Add</button>
+        </div>
       </div>
     </section>
     <section class="panel"><div class="panel-h"><h2>Your recent updates</h2></div>
       <div class="panel-b" style="display:grid;gap:11px">
         ${past.length ? past.map(u => `<div style="border-left:2px solid var(--line);padding-left:9px">
           <div style="font-size:10.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.06em">${esc(fmtDate(u.date, { absolute: true }))}</div>
-          ${u.completed ? `<div style="font-size:12.5px"><strong>Completed:</strong> ${esc(u.completed)}</div>` : ""}
-          ${u.current ? `<div style="font-size:12.5px"><strong>On now:</strong> ${esc(u.current)}</div>` : ""}
-          ${u.blocked ? `<div style="font-size:12.5px;color:var(--block)"><strong>Blocked:</strong> ${esc(u.blocked)}</div>` : ""}
+          ${planItems(u).map(it => `<div style="font-size:12.5px;${it.done ? "text-decoration:line-through;color:var(--ink-4)" : ""}">${esc(it.text)}</div>`).join("") || emptyState("No items", "")}
         </div>`).join("") : emptyState("No updates yet", "")}
       </div></section>
   </div>`;

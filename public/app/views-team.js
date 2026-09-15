@@ -94,12 +94,7 @@ function viewEmployee(id) {
         <div class="panel-b" style="display:grid;gap:11px">
           ${ups.length ? ups.map(u => `<div style="border-left:2px solid var(--accent-line);padding-left:9px">
             <div style="font-size:10.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.06em">${esc(fmtDate(u.date, { absolute: true }))}</div>
-            ${u.completed ? `<div style="font-size:12.5px"><strong>Completed:</strong> ${esc(u.completed)}</div>` : ""}
-            ${u.current ? `<div style="font-size:12.5px"><strong>On now:</strong> ${esc(u.current)}</div>` : ""}
-            ${u.next ? `<div style="font-size:12.5px"><strong>Next:</strong> ${esc(u.next)}</div>` : ""}
-            ${u.blocked ? `<div style="font-size:12.5px;color:var(--block)"><strong>Blocked:</strong> ${esc(u.blocked)}</div>` : ""}
-            ${u.help ? `<div style="font-size:12.5px;color:var(--warn)"><strong>Needs help:</strong> ${esc(u.help)}</div>` : ""}
-            ${u.note ? `<div style="font-size:12px;color:var(--ink-3)">${esc(u.note)}</div>` : ""}
+            ${planItems(u).map(it => `<div style="font-size:12.5px;${it.done ? "text-decoration:line-through;color:var(--ink-4)" : ""}">${esc(it.text)}</div>`).join("")}
           </div>`).join("") : emptyState("No updates posted", "Nothing submitted through the daily update form yet.")}
         </div></section>
     </div>
@@ -208,11 +203,7 @@ function viewDaily() {
         <div class="panel-b" style="display:grid;gap:10px">
           ${todaysUpdates.map(({ e, u }) => `<div style="border-left:2px solid ${e.color || avColor(e.id)};padding-left:9px">
             <strong style="font-size:12.5px">${esc(e.name)}</strong>
-            ${u.completed ? `<div style="font-size:12.5px"><span style="color:var(--ink-4)">Completed:</span> ${esc(u.completed)}</div>` : ""}
-            ${u.current ? `<div style="font-size:12.5px"><span style="color:var(--ink-4)">On now:</span> ${esc(u.current)}</div>` : ""}
-            ${u.next ? `<div style="font-size:12.5px"><span style="color:var(--ink-4)">Next:</span> ${esc(u.next)}</div>` : ""}
-            ${u.blocked ? `<div style="font-size:12.5px;color:var(--block)"><span style="color:var(--ink-4)">Blocked:</span> ${esc(u.blocked)}</div>` : ""}
-            ${u.help ? `<div style="font-size:12.5px;color:var(--warn)"><span style="color:var(--ink-4)">Needs help:</span> ${esc(u.help)}</div>` : ""}
+            ${planItems(u).map(it => `<div style="font-size:12.5px;${it.done ? "text-decoration:line-through;color:var(--ink-4)" : ""}">${esc(it.text)}</div>`).join("")}
           </div>`).join("") || emptyState("No check-ins yet today", "")}
           ${missing.length ? `<div class="note-box">No update yet from ${missing.map(e => esc(e.name)).join(", ")}. Their task records are still current below — the check-in is optional colour, not the source of truth.</div>` : ""}
         </div></section>
@@ -227,6 +218,36 @@ function viewDaily() {
           <span class="m" style="color:var(--block)">${esc((t.blocker || {}).reason || "")} · ${f.blockedDays}d${f.needsManager ? " · needs you" : ""}</span></span></div>`; }).join("") || emptyState("Nothing blocked", "")}</div></section>
     </div>
   </div>`;
+}
+/** Everyone's plan for today, one card each, tiled so a manager can scan the
+ *  whole company at once — unlike "Today's check-ins" above, a person with
+ *  no entry yet still gets a card (so a gap in the day is visible directly,
+ *  not just named in a footnote). */
+function viewDayBoard() {
+  const offset = Math.min(0, S.dayBoardOffset || 0);
+  const isToday = offset === 0;
+  const date = iso(addDays(new Date(), offset));
+  const people = S.employees.filter(e => e.active !== false).slice().sort(by(e => e.name));
+  const rows = people.map(e => ({ e, u: myUpdates(e.id).find(x => x.date === date) }));
+  return `
+  <div class="ph"><div><h1>Day plan board</h1>
+    <div class="sub">What everyone ${isToday ? "'s doing today" : "posted"}, ${people.length} people, one screen.</div></div>
+    <div class="sp" style="align-items:center">
+      <button class="btn sm" data-dayboard="-1">${icon("clock")}← Previous day</button>
+      <input class="inp" type="date" id="dayboard-date" value="${date}" max="${todayISO()}" style="width:150px">
+      <button class="btn sm" data-dayboard="1" ${isToday ? "disabled" : ""}>Next day →</button>
+      <button class="btn sm pri" data-dayboard="0" ${isToday ? "disabled" : ""}>Today</button>
+    </div></div>
+  <section class="panel"><div class="panel-h"><h2>${esc(fmtDate(date, { absolute: true }))}</h2><span class="hint">${rows.filter(r => r.u).length} of ${people.length} checked in</span></div>
+    <div class="panel-b" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">
+      ${rows.map(({ e, u }) => { const items = u ? planItems(u) : []; const done = items.filter(it => it.done).length;
+        return `<div style="border-left:2px solid ${e.color || avColor(e.id)};padding:2px 0 2px 9px;${u ? "" : "opacity:.6;border-left-style:dashed"}">
+        <div style="display:flex;gap:7px;align-items:center">${av(e, "sm")}<strong style="font-size:12.5px">${esc(e.name)}</strong>
+          ${items.length ? `<span style="margin-left:auto;font-size:11px;color:var(--ink-4)">${done}/${items.length}</span>` : ""}</div>
+        ${items.length ? items.map(it => `<div style="font-size:12.5px;${it.done ? "text-decoration:line-through;color:var(--ink-4)" : ""}">${esc(it.text)}</div>`).join("")
+          : `<div style="font-size:12.5px;color:var(--ink-4)">${isToday ? "No check-in yet today" : "No check-in that day"}</div>`}
+      </div>`; }).join("") || emptyState("No one on the team yet", "")}
+    </div></section>`;
 }
 function summaryText() {
   const ts = visibleTasks(), k = teamKPIs(ts), today = todayISO(), d = new Date();

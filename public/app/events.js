@@ -16,7 +16,7 @@ function setFilterFromKpi(spec) {
 }
 
 document.addEventListener("click", async ev => {
-  const el = ev.target.closest("[data-newtask],[data-view],[data-go],[data-kpi],[data-open],[data-close],[data-tab],[data-account],[data-savepw],[data-logout],[data-copytemp],[data-resetpw],[data-emp],[data-proj],[data-projtasks],[data-newfor],[data-newemp],[data-editemp],[data-newproj],[data-delproj],[data-edittask],[data-savetask],[data-deltask],[data-complete],[data-reopen],[data-blockit],[data-saveblocker],[data-unblock],[data-quickprog],[data-saveprogress],[data-pg],[data-setprog],[data-addcmt],[data-addlink],[data-savelink],[data-dellink],[data-delatt],[data-adddep],[data-savedep],[data-toggledep],[data-deldep],[data-saveemp],[data-saveproj],[data-bulk],[data-savebulk],[data-quick],[data-pick],[data-export],[data-week],[data-clearfilters],[data-blockfilter],[data-sort],[data-copysummary],[data-saveupdate],[data-prefill],[data-adddept],[data-deldept],[data-addteam],[data-delteam],[data-addstatus],[data-delstatus],[data-wd]");
+  const el = ev.target.closest("[data-newtask],[data-view],[data-go],[data-kpi],[data-open],[data-close],[data-tab],[data-account],[data-savepw],[data-logout],[data-copytemp],[data-resetpw],[data-emp],[data-proj],[data-projtasks],[data-newfor],[data-newemp],[data-editemp],[data-newproj],[data-delproj],[data-edittask],[data-savetask],[data-deltask],[data-complete],[data-reopen],[data-blockit],[data-saveblocker],[data-unblock],[data-quickprog],[data-saveprogress],[data-pg],[data-setprog],[data-addcmt],[data-addlink],[data-savelink],[data-dellink],[data-delatt],[data-adddep],[data-savedep],[data-toggledep],[data-deldep],[data-saveemp],[data-saveproj],[data-bulk],[data-savebulk],[data-quick],[data-pick],[data-export],[data-week],[data-clearfilters],[data-blockfilter],[data-sort],[data-copysummary],[data-dayboard],[data-addplan],[data-toggleplan],[data-delplan],[data-prefillplan],[data-adddept],[data-deldept],[data-addteam],[data-delteam],[data-addstatus],[data-delstatus],[data-wd]");
   if (!el) return;
   const d = el.dataset;
 
@@ -51,6 +51,10 @@ document.addEventListener("click", async ev => {
   if (d.projtasks) { S.filters = Object.assign({}, S.filters, { project: d.projtasks }); return go("tasks"); }
   if (d.week != null && d.week !== "") {
     S.analyticsWeek = d.week === "0" ? 0 : Math.min(0, S.analyticsWeek + Number(d.week));
+    return render();
+  }
+  if (d.dayboard != null && d.dayboard !== "") {
+    S.dayBoardOffset = d.dayboard === "0" ? 0 : Math.min(0, (S.dayBoardOffset || 0) + Number(d.dayboard));
     return render();
   }
   if ("clearfilters" in d) { S.filters = { assignee: "", dept: "", team: "", project: "", priority: "", status: "", flag: "", due: "", search: "", completed: "", minProgress: "", maxProgress: "" }; return render(); }
@@ -290,20 +294,32 @@ document.addEventListener("click", async ev => {
     }
   }
 
-  /* ---- daily update ---- */
-  if ("prefill" in d) {
-    const done = S.tasks.filter(t => t.assigneeId === meId() && t.status === "COMPLETED" && (t.completedAt || "").slice(0, 10) === todayISO());
-    $("#u-completed").value = done.map(t => t.title).join("; ");
+  /* ---- daily update (a checklist, saved on every change) ---- */
+  if ("addplan" in d) {
+    const el = $("#u-newitem"); const text = el.value.trim(); if (!text) return;
+    const existing = myUpdates(meId()).find(u => u.date === todayISO()) || {};
+    const items = planItems(existing).concat([{ id: uid("pi"), text, done: false }]);
+    await savePlanItems(items);
     return;
   }
-  if ("saveupdate" in d) {
-    const entry = { date: todayISO(), at: nowISO(),
-      completed: $("#u-completed").value.trim(), current: $("#u-current").value.trim(), next: $("#u-next").value.trim(),
-      blocked: $("#u-blocked").value.trim(), help: $("#u-help").value.trim(), note: $("#u-note").value.trim() };
-    if (!entry.completed && !entry.current && !entry.next && !entry.blocked) { toast("Fill in at least one answer.", true); return; }
-    await saveDailyUpdate(entry);
-    toast("Update posted — your manager sees it on the daily summary");
-    return go(isManager() ? "cc" : "myday");
+  if (d.toggleplan) {
+    const existing = myUpdates(meId()).find(u => u.date === todayISO()) || {};
+    const items = planItems(existing).map(it => it.id === d.toggleplan ? { ...it, done: !it.done } : it);
+    await savePlanItems(items);
+    return;
+  }
+  if (d.delplan) {
+    const existing = myUpdates(meId()).find(u => u.date === todayISO()) || {};
+    const items = planItems(existing).filter(it => it.id !== d.delplan);
+    await savePlanItems(items);
+    return;
+  }
+  if ("prefillplan" in d) {
+    const done = S.tasks.filter(t => t.assigneeId === meId() && t.status === "COMPLETED" && (t.completedAt || "").slice(0, 10) === todayISO());
+    const existing = myUpdates(meId()).find(u => u.date === todayISO()) || {};
+    const items = planItems(existing).concat(done.map(t => ({ id: uid("pi"), text: t.title, done: true })));
+    await savePlanItems(items);
+    return;
   }
 
   /* ---- settings ---- */
@@ -349,6 +365,11 @@ document.addEventListener("change", ev => {
       if (ok) { toast("Sent " + file.name); drawerTab = "resources"; renderDrawer(); }
     })();
     return;
+  }
+  if (id === "dayboard-date") {
+    const picked = dOf(t.value); if (!picked) return;
+    S.dayBoardOffset = Math.min(0, daysBetween(new Date(), picked));
+    return render();
   }
   const F = S.filters;
   const map = { "f-assignee": "assignee", "f-dept": "dept", "f-team": "team", "f-project": "project", "f-priority": "priority", "f-status": "status", "f-due": "due", "f-flag": "flag", "f-completed": "completed", "f-minp": "minProgress", "f-maxp": "maxProgress" };

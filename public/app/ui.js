@@ -119,6 +119,7 @@ const VIEWS = {
   blockers:  { label: "Blockers",       icon: "ban",      roles: ["manager"] },
   projects:  { label: "Projects",       icon: "folder",   roles: ["manager", "employee"] },
   daily:     { label: "Daily summary",  icon: "inbox",    roles: ["manager"] },
+  dayboard:  { label: "Day plan board", icon: "board",    roles: ["manager"] },
   update:    { label: "Daily update",   icon: "edit",     roles: ["manager", "employee"] },
   analytics: { label: "Analytics",      icon: "chart",    roles: ["manager"] },
   settings:  { label: "Settings",       icon: "cog",      roles: ["manager"] }
@@ -126,7 +127,7 @@ const VIEWS = {
 const NAV_GROUPS = [
   { h: "Overview", items: ["cc", "myday", "working", "attention"] },
   { h: "Work",     items: ["board", "tasks", "blockers", "projects"] },
-  { h: "Reporting",items: ["daily", "update", "analytics"] },
+  { h: "Reporting",items: ["daily", "dayboard", "update", "analytics"] },
   { h: "Admin",    items: ["team", "settings"] }
 ];
 function paintNav() {
@@ -193,7 +194,7 @@ function paint() {
   const body = ({
     cc: viewControlCenter, myday: viewMyDay, working: viewWorking, attention: viewAttention,
     board: viewBoard, tasks: viewTasks, team: viewTeam, blockers: viewBlockers,
-    projects: viewProjects, daily: viewDaily, update: viewUpdate, analytics: viewAnalytics, settings: viewSettings
+    projects: viewProjects, daily: viewDaily, dayboard: viewDayBoard, update: viewUpdate, analytics: viewAnalytics, settings: viewSettings
   }[S.view] || viewControlCenter)();
   v.innerHTML = banner + body;
 }
