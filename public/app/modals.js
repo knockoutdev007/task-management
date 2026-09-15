@@ -224,6 +224,9 @@ function accountModal() {
           ${NOTIFY_LABELS.map(([k, l]) => `<label style="display:flex;gap:8px;align-items:center;font-size:12.5px">
               <input type="checkbox" data-mynotify="${k}" ${(S.myNotifyPrefs || {})[k] !== undefined ? ((S.myNotifyPrefs || {})[k] ? "checked" : "") : ((cfg().notify || {})[k] ? "checked" : "")}>${esc(l)}</label>`).join("")}
           <div class="hlp">Your own setting, on top of the org default. Unchecked here but on org-wide means it's off just for you.</div>
+          <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-top:6px;padding-top:6px;border-top:1px solid var(--line)">
+            <input type="checkbox" id="desktopNotifsToggle" data-desktopnotifs ${store.get("desktopNotifs", false) ? "checked" : ""}>
+            Also show a desktop notification when this tab isn't focused</label>
         </div></div>
     </div>
     <div class="df"><button class="btn dgr" data-logout>${icon("x")}Sign out</button>

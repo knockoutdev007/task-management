@@ -88,10 +88,14 @@ function openStream() {
     if (msg.actorId && S.me && msg.actorId === S.me.id) return;   // our own write, already applied
     const cols = msg.collections || ["tasks"];
     const before = cols.includes("tasks") ? new Map(S.tasks.map(t => [t.id, t.assigneeId])) : null;
+    const knownNotifIds = cols.includes("notifications") ? new Set(S.notifications.map(n => n.id)) : null;
     await refresh(cols);
     if (before && S.me && (cfg().notify || {}).assigned !== false) {
       const mine = S.tasks.filter(t => t.assigneeId === S.me.id && before.get(t.id) !== S.me.id);
       if (mine.length) queueAssignPopup(empName(msg.actorId), mine);
+    }
+    if (knownNotifIds) {
+      S.notifications.filter(n => !knownNotifIds.has(n.id)).forEach(maybeDesktopNotify);
     }
   });
   stream.onopen = async () => {
@@ -273,6 +277,31 @@ async function saveConfig() {
   render();
   return true;
 }
+/* ------------------------------------------------------- desktop notifications */
+// Off by default; a person opts in from the Account modal, which is the only
+// place permission is ever requested (never on load - browsers expect a
+// direct user gesture, and an unsolicited prompt is its own kind of nag).
+const desktopNotifsWanted = () => store.get("desktopNotifs", false) && window.Notification && Notification.permission === "granted";
+
+async function enableDesktopNotifs() {
+  if (!window.Notification) { toast("Your browser doesn't support desktop notifications.", true); return false; }
+  const perm = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+  if (perm !== "granted") { toast("Desktop notifications need to be allowed in your browser.", true); return false; }
+  store.set("desktopNotifs", true);
+  render();
+  return true;
+}
+function disableDesktopNotifs() { store.set("desktopNotifs", false); render(); }
+
+/** Same kind → preference gating as the in-app list, so a muted kind stays muted here too. */
+function maybeDesktopNotify(n) {
+  if (!desktopNotifsWanted() || document.hasFocus()) return;
+  const prefs = { ...(cfg().notify || {}), ...(S.myNotifyPrefs || {}) };
+  const pk = PREF[n.kind];
+  if (pk && prefs[pk] === false) return;
+  new Notification(n.text, { tag: n.id });
+}
+
 /** Opening the bell clears every unread row in one call, optimistically. */
 async function markAllNotificationsRead() {
   const at = new Date().toISOString();

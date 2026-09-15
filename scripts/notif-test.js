@@ -54,6 +54,33 @@ function loadClient() {
   return sandbox;
 }
 
+/** Loads util.js + metrics.js + api.js, with just enough stubbed (a fake
+ *  EventSource/Notification, document.hasFocus, localStorage) to exercise
+ *  maybeDesktopNotify()'s gating without a real browser. */
+function loadClientWithApi({ focused = false, permission = "granted", optedIn = true } = {}) {
+  const fired = [];
+  class FakeEventSource { constructor() { this.listeners = {}; } addEventListener(t, f) { this.listeners[t] = f; } close() {} }
+  class FakeNotification { constructor(text, opts) { fired.push({ text, ...opts }); } static requestPermission() { return Promise.resolve(permission); } }
+  FakeNotification.permission = permission;
+  const store = new Map(optedIn ? [["tcc:desktopNotifs", "true"]] : []);
+  const sandbox = {
+    console,
+    window: { EventSource: FakeEventSource, Notification: FakeNotification },
+    Notification: FakeNotification, EventSource: FakeEventSource,
+    document: { hasFocus: () => focused, querySelectorAll: () => [], createElement: () => ({ classList: { add() {} }, style: {} }) },
+    localStorage: { getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k) },
+    requestAnimationFrame: fn => fn(),
+    paint: () => {}, queueAssignPopup: () => {}, empName: () => "",
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({}) })
+  };
+  vm.createContext(sandbox);
+  for (const file of ["util.js", "metrics.js", "api.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(APP, file), "utf8"), sandbox, { filename: file });
+  }
+  vm.runInContext("this.S = S; this.maybeDesktopNotify = maybeDesktopNotify;", sandbox);
+  return { sandbox, fired };
+}
+
 const sandbox = loadClient();
 ok("notifications() loaded from the real metrics.js source", typeof sandbox.notifications === "function");
 
@@ -116,6 +143,32 @@ const emittedKinds = new Set([...fanoutBody.matchAll(/(?:add|forManagers)\([^,]+
 ok("found kind literals in notificationRecipients to check", emittedKinds.size > 0, [...emittedKinds]);
 const missingFromPref = [...emittedKinds].filter(k => !(k in sandbox.PREF));
 ok("every kind src/domain.js can emit has a PREF entry in metrics.js", missingFromPref.length === 0, missingFromPref);
+
+// Desktop notifications (maybeDesktopNotify, public/app/api.js) must never
+// fire unless the person opted in, granted permission, the tab is actually
+// unfocused, and the kind isn't muted — any one of these being wrong would
+// either spam someone who never asked, or silently never notify anyone.
+const feedRowFor = kind => ({ id: "n1", taskId: "T-1", kind, text: "hello", at: new Date().toISOString(), readAt: null });
+
+let d = loadClientWithApi({ focused: false, optedIn: false });
+d.sandbox.S.me = { id: "e1" }; d.sandbox.S.config = { notify: {} }; d.sandbox.S.myNotifyPrefs = {};
+d.sandbox.maybeDesktopNotify(feedRowFor("assign"));
+ok("desktop notif: not opted in -> nothing fires", d.fired.length === 0, d.fired);
+
+d = loadClientWithApi({ focused: false, optedIn: true });
+d.sandbox.S.me = { id: "e1" }; d.sandbox.S.config = { notify: { assigned: true } }; d.sandbox.S.myNotifyPrefs = {};
+d.sandbox.maybeDesktopNotify(feedRowFor("assign"));
+ok("desktop notif: opted in + unfocused + permission granted -> fires", d.fired.length === 1 && d.fired[0].text === "hello", d.fired);
+
+d = loadClientWithApi({ focused: true, optedIn: true });
+d.sandbox.S.me = { id: "e1" }; d.sandbox.S.config = { notify: { assigned: true } }; d.sandbox.S.myNotifyPrefs = {};
+d.sandbox.maybeDesktopNotify(feedRowFor("assign"));
+ok("desktop notif: tab focused -> suppressed", d.fired.length === 0, d.fired);
+
+d = loadClientWithApi({ focused: false, optedIn: true });
+d.sandbox.S.me = { id: "e1" }; d.sandbox.S.config = { notify: { assigned: true } }; d.sandbox.S.myNotifyPrefs = { assigned: false };
+d.sandbox.maybeDesktopNotify(feedRowFor("assign"));
+ok("desktop notif: muted via personal preference -> suppressed", d.fired.length === 0, d.fired);
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

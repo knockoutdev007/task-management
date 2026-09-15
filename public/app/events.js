@@ -372,6 +372,11 @@ document.addEventListener("change", ev => {
   if ("cats" in ds) { cfg().categories = t.value.split(",").map(s => s.trim()).filter(Boolean); return saveConfig(); }
   if (ds.notify) { cfg().notify = cfg().notify || {}; cfg().notify[ds.notify] = t.checked; return saveConfig(); }
   if (ds.mynotify) return saveMyNotifyPrefs({ [ds.mynotify]: t.checked });
+  if ("desktopnotifs" in ds) {
+    if (t.checked) { enableDesktopNotifs().then(ok => { t.checked = ok; }); }
+    else disableDesktopNotifs();
+    return;
+  }
 });
 let searchT;
 document.addEventListener("input", ev => {
