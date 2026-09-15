@@ -34,7 +34,7 @@ side.
 manager directly. Everyone else gets added from Settings → People inside the app.
 
 ```bash
-npm run create-manager -- "Roshani Shinde" rshinde@lghomecomfort.ca
+npm run create-manager -- "Manager Name" asha.raman@demo.example
 ```
 
 ---
