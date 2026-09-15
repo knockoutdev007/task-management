@@ -286,6 +286,24 @@ function projectStats(pid) {
 }
 
 /* ------------------------------------------------------------ notifications */
+// Table-driven so a server-emitted activity `kind` can't silently ship
+// without a matching client notification (or vice versa: `dependency`
+// below has no current emitter and is a documented, intentional no-op).
+const NOTIF_RULES = {
+  assign:     { relevant: (t, a) => a.to === meId(), text: (t, a) => `${empName(a.byId)} assigned you “${t.title}”` },
+  create:     { relevant: (t, a) => t.assigneeId === meId(), text: (t, a) => `${empName(a.byId)} assigned you “${t.title}”`, remapKind: "assign" },
+  reassign:   { relevant: (t, a, c) => a.to === meId() || c.mine,
+                text: (t, a) => a.to === meId() ? `${empName(a.byId)} assigned you “${t.title}”` : `“${t.title}” reassigned to ${empName(t.assigneeId)}`,
+                remapKind: (t, a) => a.to === meId() ? "assign" : "reassign" },
+  priority:   { relevant: (t, a, c) => c.mine || t.assigneeId === meId(), text: (t, a) => `Priority on “${t.title}” changed ${a.from} → ${a.to}` },
+  block:      { relevant: (t, a, c) => c.mine || t.createdById === meId(), text: (t) => `${empName(t.assigneeId)} reported a blocker on “${t.title}”` },
+  comment:    { relevant: (t, a, c) => c.mine || t.assigneeId === meId(), text: (t, a) => `${empName(a.byId)} commented on “${t.title}”` },
+  due:        { relevant: (t, a) => t.assigneeId === meId(), text: (t, a) => `Due date on “${t.title}” moved to ${fmtDate(a.to, { absolute: true })}` },
+  complete:   { relevant: (t, a, c) => c.mine || t.createdById === meId(), text: (t, a) => `${empName(a.byId)} completed “${t.title}”` },
+  attachment: { relevant: (t, a, c) => c.mine || t.assigneeId === meId() || t.createdById === meId(),
+                text: (t, a) => `${empName(a.byId)} ${(a.note || "").startsWith("Removed") ? "removed a file from" : "sent a file on"} “${t.title}”` },
+  dependency: { relevant: (t, a, c) => c.iNeedHelp, text: (t, a) => `${empName(a.byId)} needs your help on “${t.title}”` }
+};
 function notifications() {
   if (!S.me) return [];
   const out = [], mine = isManager();
@@ -294,22 +312,14 @@ function notifications() {
     const relevant = mine || t.assigneeId === meId() || t.createdById === meId() || iNeedHelp;
     if (!relevant) return;
     const f = flags(t);
+    const ctx = { mine, iNeedHelp };
     (t.activity || []).slice(-8).forEach(a => {
       if (a.byId === meId()) return;
       const ts = dOf(a.at); if (!ts || Date.now() - ts.getTime() > 7 * DAY) return;
-      let text = null, kind = a.kind;
-      if (a.kind === "assign" && a.to === meId()) text = `${empName(a.byId)} assigned you “${t.title}”`;
-      else if (a.kind === "create" && t.assigneeId === meId()) { text = `${empName(a.byId)} assigned you “${t.title}”`; kind = "assign"; }
-      else if (a.kind === "priority" && (mine || t.assigneeId === meId())) text = `Priority on “${t.title}” changed ${a.from} → ${a.to}`;
-      else if (a.kind === "block" && (mine || t.createdById === meId())) text = `${empName(t.assigneeId)} reported a blocker on “${t.title}”`;
-      else if (a.kind === "comment" && (mine || t.assigneeId === meId())) text = `${empName(a.byId)} commented on “${t.title}”`;
-      else if (a.kind === "reassign" && a.to === meId()) { text = `${empName(a.byId)} assigned you “${t.title}”`; kind = "assign"; }
-      else if (a.kind === "reassign" && mine) text = `“${t.title}” reassigned to ${empName(t.assigneeId)}`;
-      else if (a.kind === "due" && t.assigneeId === meId()) text = `Due date on “${t.title}” moved to ${fmtDate(a.to, { absolute: true })}`;
-      else if (a.kind === "dependency" && iNeedHelp) text = `${empName(a.byId)} needs your help on “${t.title}”`;
-      else if (a.kind === "attachment" && (mine || t.assigneeId === meId() || t.createdById === meId()))
-        text = `${empName(a.byId)} ${(a.note || "").startsWith("Removed") ? "removed a file from" : "sent a file on"} “${t.title}”`;
-      if (text) out.push({ at: a.at, text, taskId: t.id, kind, sev: kind === "block" ? 3 : kind === "dependency" ? 2 : 1 });
+      const rule = NOTIF_RULES[a.kind];
+      if (!rule || !rule.relevant(t, a, ctx)) return;
+      const kind = typeof rule.remapKind === "function" ? rule.remapKind(t, a) : (rule.remapKind || a.kind);
+      out.push({ at: a.at, text: rule.text(t, a, ctx), taskId: t.id, kind, sev: kind === "block" ? 3 : kind === "dependency" ? 2 : 1 });
     });
     if (isActive(t) && (mine ? f.overdue && (t.priority === "CRITICAL" || t.priority === "HIGH") : f.overdue)) {
       out.push({ at: t.dueDate + "T09:00:00.000Z", text: `“${t.title}” is ${f.daysOverdue}d overdue`, taskId: t.id, kind: "overdue", sev: 3 });

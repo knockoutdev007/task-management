@@ -14,7 +14,8 @@
     "seed:reset": "node --env-file-if-exists=.env scripts/seed.js --reset",
     "create-manager": "node --env-file-if-exists=.env scripts/create-manager.js",
     "backup": "node --env-file-if-exists=.env scripts/backup.js",
-    "test": "node --env-file-if-exists=.env scripts/smoke-test.js"
+    "test": "node --env-file-if-exists=.env scripts/smoke-test.js && node scripts/notif-test.js",
+    "test:notif": "node scripts/notif-test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
