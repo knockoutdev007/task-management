@@ -299,9 +299,11 @@ function notifications() {
       const ts = dOf(a.at); if (!ts || Date.now() - ts.getTime() > 7 * DAY) return;
       let text = null, kind = a.kind;
       if (a.kind === "assign" && a.to === meId()) text = `${empName(a.byId)} assigned you “${t.title}”`;
+      else if (a.kind === "create" && t.assigneeId === meId()) { text = `${empName(a.byId)} assigned you “${t.title}”`; kind = "assign"; }
       else if (a.kind === "priority" && (mine || t.assigneeId === meId())) text = `Priority on “${t.title}” changed ${a.from} → ${a.to}`;
       else if (a.kind === "block" && (mine || t.createdById === meId())) text = `${empName(t.assigneeId)} reported a blocker on “${t.title}”`;
       else if (a.kind === "comment" && (mine || t.assigneeId === meId())) text = `${empName(a.byId)} commented on “${t.title}”`;
+      else if (a.kind === "reassign" && a.to === meId()) { text = `${empName(a.byId)} assigned you “${t.title}”`; kind = "assign"; }
       else if (a.kind === "reassign" && mine) text = `“${t.title}” reassigned to ${empName(t.assigneeId)}`;
       else if (a.kind === "due" && t.assigneeId === meId()) text = `Due date on “${t.title}” moved to ${fmtDate(a.to, { absolute: true })}`;
       else if (a.kind === "dependency" && iNeedHelp) text = `${empName(a.byId)} needs your help on “${t.title}”`;
