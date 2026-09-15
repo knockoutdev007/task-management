@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import * as store from "../db.js";
 import {
   canEditTask, canCompleteTask, applyFieldPermissions, validateTask,
-  diffActivity, noteEntry, isManager
+  diffActivity, noteEntry, isManager, notificationRecipients
 } from "../domain.js";
 import { broadcast } from "../events.js";
 
@@ -68,7 +68,17 @@ function writeTask(user, id, incoming, extraNotes) {
   }
   for (const a of activity) store.addActivity(id, a);
 
-  broadcast(["tasks"], user.id);
+  const employees = store.listEmployees();
+  for (const a of activity) {
+    for (const r of notificationRecipients(merged, a, employees)) {
+      store.addNotification({
+        id: randomUUID(), employeeId: r.employeeId, taskId: id, activityId: a.id,
+        kind: r.kind, text: r.text, createdAt: a.at
+      });
+    }
+  }
+
+  broadcast(["tasks", "notifications"], user.id);
   return { status: 200, body: { task: store.getTask(id), denied } };
 }
 
@@ -116,8 +126,12 @@ export function mountTasks(app, requireUser, requireManager) {
     const c = { id: randomUUID(), authorId: req.user.id, at: new Date().toISOString(),
                 body: body.slice(0, 4000), managerNote: isManager(req.user) && !!req.body?.managerNote };
     store.addComment(t.id, c);
-    store.addActivity(t.id, noteEntry(req.user, "comment", c.body.slice(0, 200)));
-    broadcast(["tasks"], req.user.id);
+    const a = noteEntry(req.user, "comment", c.body.slice(0, 200));
+    store.addActivity(t.id, a);
+    for (const r of notificationRecipients(t, a, store.listEmployees())) {
+      store.addNotification({ id: randomUUID(), employeeId: r.employeeId, taskId: t.id, activityId: a.id, kind: r.kind, text: r.text, createdAt: a.at });
+    }
+    broadcast(["tasks", "notifications"], req.user.id);
     res.json({ task: store.getTask(t.id) });
   });
 

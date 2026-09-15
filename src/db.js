@@ -250,6 +250,34 @@ export const addAttachment = (taskId, a) =>
 export const getAttachmentRow = id => db.prepare("SELECT * FROM task_attachments WHERE id = ?").get(id);
 export const deleteAttachmentRow = id => db.prepare("DELETE FROM task_attachments WHERE id = ?").run(id);
 
+/* ------------------------------------------------------------- notifications */
+
+const notificationOut = r => ({
+  id: r.id, employeeId: r.employee_id, taskId: r.task_id, activityId: r.activity_id,
+  kind: r.kind, text: r.text, at: r.created_at, readAt: r.read_at
+});
+
+export const addNotification = n =>
+  db.prepare(`INSERT INTO notifications (id, employee_id, task_id, activity_id, kind, text, created_at, read_at)
+              VALUES (?,?,?,?,?,?,?,?)`)
+    .run(n.id, n.employeeId, n.taskId || null, n.activityId || null, n.kind, n.text, n.createdAt, n.readAt || null);
+
+/** One employee's notifications, most recent first, capped like the old client-side list was. */
+export const listNotifications = (employeeId, limit = 40) =>
+  db.prepare("SELECT * FROM notifications WHERE employee_id = ? ORDER BY created_at DESC LIMIT ?")
+    .all(employeeId, limit).map(notificationOut);
+
+export const getNotification = id => {
+  const r = db.prepare("SELECT * FROM notifications WHERE id = ?").get(id);
+  return r ? notificationOut(r) : null;
+};
+
+export const markNotificationRead = (id, employeeId, at) =>
+  db.prepare("UPDATE notifications SET read_at = ? WHERE id = ? AND employee_id = ?").run(at, id, employeeId);
+
+export const markAllNotificationsRead = (employeeId, at) =>
+  db.prepare("UPDATE notifications SET read_at = ? WHERE employee_id = ? AND read_at IS NULL").run(at, employeeId);
+
 export function nextTaskId() {
   const row = db.prepare("SELECT id FROM tasks WHERE id LIKE 'TSK-%' ORDER BY id DESC LIMIT 1").get();
   const n = row ? Number(String(row.id).slice(4)) : 0;

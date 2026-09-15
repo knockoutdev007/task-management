@@ -184,7 +184,7 @@ const PROGRESS_STEPS = [0, 10, 25, 50, 75, 90, 100];
 /* --------------------------------------------------------------------- state */
 const S = {
   ready: false, connected: false, offline: false,
-  employees: [], tasks: [], projects: [], updates: [], breaks: [], assignQueue: [],
+  employees: [], tasks: [], projects: [], updates: [], breaks: [], notifications: [], assignQueue: [],
   config: JSON.parse(JSON.stringify(DEFAULT_CONFIG)),
   me: null,
   view: store.get("view", "cc"),

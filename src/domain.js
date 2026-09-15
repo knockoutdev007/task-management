@@ -144,3 +144,74 @@ export function diffActivity(user, stored, next) {
   return out;
 }
 export const noteEntry = (user, kind, note) => entry(user, kind, null, null, null, note);
+
+/* ------------------------------------------------------------ notifications */
+
+/**
+ * Mirrors the client's NOTIF_RULES (public/app/metrics.js) but resolved to
+ * concrete recipient ids, since the client is classic-script global scope and
+ * this is an ES module — no shared-code path between them without a bundler.
+ * Keep the `kind` values used here (the notification's *display* kind, not
+ * necessarily the activity's own kind) in sync with metrics.js's NOTIF_RULES
+ * keys; scripts/notif-test.js checks both against the same key set.
+ *
+ * Returns [{ employeeId, kind, text }], one row per distinct recipient. An
+ * activity entry can fan out to more than one recipient with *different*
+ * text for each (e.g. a reassignment tells the new assignee "you were
+ * assigned" and every other manager "X was reassigned to Y").
+ */
+export function notificationRecipients(task, a, employees) {
+  const actor = a.byId;
+  const managers = employees.filter(isManager).map(e => e.id);
+  const byId = id => employees.find(e => e.id === id);
+  const nameOf = id => (byId(id) || {}).name || "Unassigned";
+  const actorName = a.byName || nameOf(actor);
+  const out = new Map();
+  const add = (employeeId, kind, text) => {
+    if (!employeeId || employeeId === actor || out.has(employeeId)) return;
+    out.set(employeeId, { kind, text });
+  };
+  const forManagers = (kind, text, except) => { for (const m of managers) if (m !== except) add(m, kind, text); };
+
+  switch (a.kind) {
+    case "create":
+      add(task.assigneeId, "assign", `${actorName} assigned you “${task.title}”`);
+      break;
+    case "assign":
+      add(a.to, "assign", `${actorName} assigned you “${task.title}”`);
+      break;
+    case "reassign":
+      add(a.to, "assign", `${actorName} assigned you “${task.title}”`);
+      forManagers("reassign", `“${task.title}” reassigned to ${nameOf(task.assigneeId)}`, a.to);
+      break;
+    case "priority":
+      forManagers("priority", `Priority on “${task.title}” changed ${a.from} → ${a.to}`);
+      add(task.assigneeId, "priority", `Priority on “${task.title}” changed ${a.from} → ${a.to}`);
+      break;
+    case "block":
+      forManagers("block", `${nameOf(task.assigneeId)} reported a blocker on “${task.title}”`);
+      add(task.createdById, "block", `${nameOf(task.assigneeId)} reported a blocker on “${task.title}”`);
+      break;
+    case "comment":
+      forManagers("comment", `${actorName} commented on “${task.title}”`);
+      add(task.assigneeId, "comment", `${actorName} commented on “${task.title}”`);
+      break;
+    case "due":
+      add(task.assigneeId, "due", `Due date on “${task.title}” moved to ${a.to}`);
+      break;
+    case "complete":
+      forManagers("complete", `${actorName} completed “${task.title}”`);
+      add(task.createdById, "complete", `${actorName} completed “${task.title}”`);
+      break;
+    case "attachment": {
+      const text = `${actorName} ${(a.note || "").startsWith("Removed") ? "removed a file from" : "sent a file on"} “${task.title}”`;
+      forManagers("attachment", text);
+      add(task.assigneeId, "attachment", text);
+      add(task.createdById, "attachment", text);
+      break;
+    }
+    default:
+      break; // "edit", "status", "progress", "unblock", "reopen", "dependency" — no fan-out today
+  }
+  return Array.from(out, ([employeeId, v]) => ({ employeeId, kind: v.kind, text: v.text }));
+}

@@ -139,6 +139,19 @@ CREATE TABLE IF NOT EXISTS breaks (
 );
 CREATE INDEX IF NOT EXISTS idx_breaks_employee ON breaks(employee_id, started_at);
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id          TEXT PRIMARY KEY,
+  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  task_id     TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+  activity_id TEXT REFERENCES task_activity(id) ON DELETE SET NULL,
+  kind        TEXT NOT NULL,
+  text        TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  read_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_employee ON notifications(employee_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread   ON notifications(employee_id, read_at);
+
 CREATE TABLE IF NOT EXISTS config (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,                 -- JSON

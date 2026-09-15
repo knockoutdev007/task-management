@@ -61,6 +61,7 @@ function absorb(d) {
   if (d.updates) S.updates = d.updates;
   if (d.breaks) S.breaks = d.breaks;
   if (d.config) S.config = Object.assign(clone(DEFAULT_CONFIG), d.config);
+  if (d.notifications) S.notifications = d.notifications;
 }
 
 async function initData() {
@@ -92,7 +93,14 @@ function openStream() {
       if (mine.length) queueAssignPopup(empName(msg.actorId), mine);
     }
   });
-  stream.onopen = () => { streamRetry = 0; S.offline = false; };
+  stream.onopen = async () => {
+    streamRetry = 0; S.offline = false;
+    // A connection can drop and come back with no broadcast to say what was
+    // missed (src/events.js keeps no per-client backlog) - resync everything
+    // rather than leave stale state until unrelated activity happens to
+    // trigger the next broadcast.
+    await refresh(["tasks", "employees", "projects", "updates", "breaks", "config", "notifications"]);
+  };
   stream.onerror = () => {
     stream.close(); stream = null;
     streamRetry = Math.min(streamRetry + 1, 6);
@@ -107,6 +115,7 @@ async function refresh(collections) {
   if (collections.includes("updates"))   jobs.push(GET("/api/updates").then(r => r.ok && (S.updates = r.data.updates)));
   if (collections.includes("breaks"))    jobs.push(GET("/api/breaks").then(r => r.ok && (S.breaks = r.data.breaks)));
   if (collections.includes("config"))    jobs.push(GET("/api/config").then(r => r.ok && (S.config = Object.assign(clone(DEFAULT_CONFIG), r.data.config))));
+  if (collections.includes("notifications")) jobs.push(GET("/api/notifications").then(r => r.ok && (S.notifications = r.data.notifications)));
   await Promise.all(jobs);
   render();
 }

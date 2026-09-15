@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
 import * as store from "../db.js";
-import { canEditTask, isManager, noteEntry } from "../domain.js";
+import { canEditTask, isManager, noteEntry, notificationRecipients } from "../domain.js";
 import { broadcast } from "../events.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -59,8 +59,12 @@ export function mountAttachments(app, requireUser) {
         uploadedById: req.user.id, uploadedAt: new Date().toISOString()
       };
       store.addAttachment(t.id, a);
-      store.addActivity(t.id, noteEntry(req.user, "attachment", "Attached: " + a.originalName));
-      broadcast(["tasks"], req.user.id);
+      const act = noteEntry(req.user, "attachment", "Attached: " + a.originalName);
+      store.addActivity(t.id, act);
+      for (const r of notificationRecipients(t, act, store.listEmployees())) {
+        store.addNotification({ id: randomUUID(), employeeId: r.employeeId, taskId: t.id, activityId: act.id, kind: r.kind, text: r.text, createdAt: act.at });
+      }
+      broadcast(["tasks", "notifications"], req.user.id);
       res.status(201).json({ task: store.getTask(t.id) });
     });
   });
@@ -82,8 +86,12 @@ export function mountAttachments(app, requireUser) {
     if (!allowed) return res.status(403).json({ error: "You can't remove that file." });
     store.deleteAttachmentRow(row.id);
     fs.unlink(path.join(UPLOAD_DIR, row.filename), () => {});
-    store.addActivity(t.id, noteEntry(req.user, "attachment", "Removed: " + row.original_name));
-    broadcast(["tasks"], req.user.id);
+    const act = noteEntry(req.user, "attachment", "Removed: " + row.original_name);
+    store.addActivity(t.id, act);
+    for (const r of notificationRecipients(t, act, store.listEmployees())) {
+      store.addNotification({ id: randomUUID(), employeeId: r.employeeId, taskId: t.id, activityId: act.id, kind: r.kind, text: r.text, createdAt: act.at });
+    }
+    broadcast(["tasks", "notifications"], req.user.id);
     res.json({ task: store.getTask(t.id) });
   });
 }

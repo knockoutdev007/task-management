@@ -286,41 +286,30 @@ function projectStats(pid) {
 }
 
 /* ------------------------------------------------------------ notifications */
-// Table-driven so a server-emitted activity `kind` can't silently ship
-// without a matching client notification (or vice versa: `dependency`
-// below has no current emitter and is a documented, intentional no-op).
-const NOTIF_RULES = {
-  assign:     { relevant: (t, a) => a.to === meId(), text: (t, a) => `${empName(a.byId)} assigned you “${t.title}”` },
-  create:     { relevant: (t, a) => t.assigneeId === meId(), text: (t, a) => `${empName(a.byId)} assigned you “${t.title}”`, remapKind: "assign" },
-  reassign:   { relevant: (t, a, c) => a.to === meId() || c.mine,
-                text: (t, a) => a.to === meId() ? `${empName(a.byId)} assigned you “${t.title}”` : `“${t.title}” reassigned to ${empName(t.assigneeId)}`,
-                remapKind: (t, a) => a.to === meId() ? "assign" : "reassign" },
-  priority:   { relevant: (t, a, c) => c.mine || t.assigneeId === meId(), text: (t, a) => `Priority on “${t.title}” changed ${a.from} → ${a.to}` },
-  block:      { relevant: (t, a, c) => c.mine || t.createdById === meId(), text: (t) => `${empName(t.assigneeId)} reported a blocker on “${t.title}”` },
-  comment:    { relevant: (t, a, c) => c.mine || t.assigneeId === meId(), text: (t, a) => `${empName(a.byId)} commented on “${t.title}”` },
-  due:        { relevant: (t, a) => t.assigneeId === meId(), text: (t, a) => `Due date on “${t.title}” moved to ${fmtDate(a.to, { absolute: true })}` },
-  complete:   { relevant: (t, a, c) => c.mine || t.createdById === meId(), text: (t, a) => `${empName(a.byId)} completed “${t.title}”` },
-  attachment: { relevant: (t, a, c) => c.mine || t.assigneeId === meId() || t.createdById === meId(),
-                text: (t, a) => `${empName(a.byId)} ${(a.note || "").startsWith("Removed") ? "removed a file from" : "sent a file on"} “${t.title}”` },
-  dependency: { relevant: (t, a, c) => c.iNeedHelp, text: (t, a) => `${empName(a.byId)} needs your help on “${t.title}”` }
-};
+// Preference key each notification `kind` is gated by. Kept in sync with the
+// server's fan-out (src/domain.js notificationRecipients) by scripts/notif-test.js.
+const PREF = { assign: "assigned", priority: "priority", block: "blocked", comment: "comment",
+               reassign: "reassigned", due: "dueSoon", overdue: "overdue", complete: "completed", dependency: "dependency", attachment: "attachment" };
+
 function notifications() {
   if (!S.me) return [];
   const out = [], mine = isManager();
+
+  // Server-authoritative feed: one pre-rendered row per relevant event,
+  // already scoped to this employee (src/domain.js notificationRecipients).
+  (S.notifications || []).forEach(n => {
+    out.push({ id: n.id, at: n.at, text: n.text, taskId: n.taskId, kind: n.kind, readAt: n.readAt,
+               sev: n.kind === "block" ? 3 : n.kind === "dependency" ? 2 : 1 });
+  });
+
+  // Point-in-time reminders that aren't tied to a discrete event - a task
+  // becomes overdue just because the clock moved, not because anyone did
+  // anything - so these are still computed live from current task state.
   S.tasks.forEach(t => {
     const iNeedHelp = (t.dependencies || []).some(d => d.ownerId === meId() && d.status !== "RESOLVED");
     const relevant = mine || t.assigneeId === meId() || t.createdById === meId() || iNeedHelp;
     if (!relevant) return;
     const f = flags(t);
-    const ctx = { mine, iNeedHelp };
-    (t.activity || []).slice(-8).forEach(a => {
-      if (a.byId === meId()) return;
-      const ts = dOf(a.at); if (!ts || Date.now() - ts.getTime() > 7 * DAY) return;
-      const rule = NOTIF_RULES[a.kind];
-      if (!rule || !rule.relevant(t, a, ctx)) return;
-      const kind = typeof rule.remapKind === "function" ? rule.remapKind(t, a) : (rule.remapKind || a.kind);
-      out.push({ at: a.at, text: rule.text(t, a, ctx), taskId: t.id, kind, sev: kind === "block" ? 3 : kind === "dependency" ? 2 : 1 });
-    });
     if (isActive(t) && (mine ? f.overdue && (t.priority === "CRITICAL" || t.priority === "HIGH") : f.overdue)) {
       out.push({ at: t.dueDate + "T09:00:00.000Z", text: `“${t.title}” is ${f.daysOverdue}d overdue`, taskId: t.id, kind: "overdue", sev: 3 });
     }
@@ -328,8 +317,7 @@ function notifications() {
       out.push({ at: nowISO(), text: `“${t.title}” is due tomorrow`, taskId: t.id, kind: "due", sev: 2 });
     }
   });
-  const PREF = { assign: "assigned", priority: "priority", block: "blocked", comment: "comment",
-                 reassign: "reassigned", due: "dueSoon", overdue: "overdue", complete: "completed", dependency: "dependency", attachment: "attachment" };
+
   const prefs = cfg().notify || {};
   const seen = new Set();
   return out.filter(n => {
