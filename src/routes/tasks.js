@@ -8,8 +8,20 @@ import { randomUUID } from "node:crypto";
 import * as store from "../db.js";
 import {
   canEditTask, canCompleteTask, applyFieldPermissions, validateTask,
-  diffActivity, noteEntry, isManager, notificationRecipients
+  diffActivity, noteEntry, isManager, notificationRecipients, mentionedEmployeeIds
 } from "../domain.js";
+
+/** @-mentions in a comment notify directly, on top of whatever
+ *  notificationRecipients() already covers for the "comment" activity kind. */
+function notifyMentions(task, comment, user, employees) {
+  for (const empId of mentionedEmployeeIds(comment.body, employees)) {
+    if (empId === user.id) continue;
+    store.addNotification({
+      id: randomUUID(), employeeId: empId, taskId: task.id, activityId: null,
+      kind: "mention", text: `${user.name} mentioned you in a comment on “${task.title}”`, createdAt: comment.at
+    });
+  }
+}
 import { broadcast } from "../events.js";
 
 const clean = s => (s == null ? null : String(s));
@@ -77,6 +89,7 @@ function writeTask(user, id, incoming, extraNotes) {
       });
     }
   }
+  for (const c of addedComments) notifyMentions(merged, c, user, employees);
 
   broadcast(["tasks", "notifications"], user.id);
   return { status: 200, body: { task: store.getTask(id), denied } };
@@ -128,9 +141,11 @@ export function mountTasks(app, requireUser, requireManager) {
     store.addComment(t.id, c);
     const a = noteEntry(req.user, "comment", c.body.slice(0, 200));
     store.addActivity(t.id, a);
-    for (const r of notificationRecipients(t, a, store.listEmployees())) {
+    const employees = store.listEmployees();
+    for (const r of notificationRecipients(t, a, employees)) {
       store.addNotification({ id: randomUUID(), employeeId: r.employeeId, taskId: t.id, activityId: a.id, kind: r.kind, text: r.text, createdAt: a.at });
     }
+    notifyMentions(t, c, req.user, employees);
     broadcast(["tasks", "notifications"], req.user.id);
     res.json({ task: store.getTask(t.id) });
   });

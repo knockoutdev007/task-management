@@ -289,7 +289,7 @@ function projectStats(pid) {
 // Preference key each notification `kind` is gated by. Kept in sync with the
 // server's fan-out (src/domain.js notificationRecipients) by scripts/notif-test.js.
 const PREF = { assign: "assigned", priority: "priority", block: "blocked", comment: "comment",
-               reassign: "reassigned", due: "dueSoon", overdue: "overdue", complete: "completed", dependency: "dependency", attachment: "attachment" };
+               reassign: "reassigned", due: "dueSoon", overdue: "overdue", complete: "completed", dependency: "dependency", attachment: "attachment", mention: "mentioned" };
 
 function notifications() {
   if (!S.me) return [];
@@ -299,7 +299,7 @@ function notifications() {
   // already scoped to this employee (src/domain.js notificationRecipients).
   (S.notifications || []).forEach(n => {
     out.push({ id: n.id, at: n.at, text: n.text, taskId: n.taskId, kind: n.kind, readAt: n.readAt,
-               sev: n.kind === "block" ? 3 : n.kind === "dependency" ? 2 : 1 });
+               sev: n.kind === "block" ? 3 : n.kind === "dependency" || n.kind === "mention" ? 2 : 1 });
   });
 
   // Point-in-time reminders that aren't tied to a discrete event - a task

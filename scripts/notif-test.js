@@ -20,6 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
+import { mentionedEmployeeIds } from "../src/domain.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.join(HERE, "..", "public", "app");
@@ -169,6 +170,24 @@ d = loadClientWithApi({ focused: false, optedIn: true });
 d.sandbox.S.me = { id: "e1" }; d.sandbox.S.config = { notify: { assigned: true } }; d.sandbox.S.myNotifyPrefs = { assigned: false };
 d.sandbox.maybeDesktopNotify(feedRowFor("assign"));
 ok("desktop notif: muted via personal preference -> suppressed", d.fired.length === 0, d.fired);
+
+// @mentions: src/domain.js mentionedEmployeeIds() resolves "@Name" tokens
+// against employee names, and metrics.js's PREF map must know about the
+// "mention" kind it feeds (src/routes/tasks.js notifyMentions), or the
+// same missing-branch bug class this whole file exists to catch recurs.
+const FIXTURE_EMPLOYEES = [
+  { id: "e-alice", name: "Alice Johnson" }, { id: "e-albert", name: "Albert Nguyen" }, { id: "e-bob", name: "Bob Lee" }
+];
+ok("mentionedEmployeeIds resolves a full \"@First Last\" mention",
+  mentionedEmployeeIds("please look at this @Alice Johnson", FIXTURE_EMPLOYEES).includes("e-alice"));
+ok("mentionedEmployeeIds resolves the right person even when another name shares a prefix",
+  JSON.stringify(mentionedEmployeeIds("cc @Albert Nguyen", FIXTURE_EMPLOYEES)) === JSON.stringify(["e-albert"]));
+ok("mentionedEmployeeIds finds every distinct mention in one comment, no duplicates",
+  JSON.stringify(mentionedEmployeeIds("@Bob Lee and also @Bob Lee again, plus @Alice", FIXTURE_EMPLOYEES).sort())
+    === JSON.stringify(["e-alice", "e-bob"]));
+ok("mentionedEmployeeIds doesn't false-positive on an @ that matches no employee name",
+  mentionedEmployeeIds("reach me at foo@example.com", FIXTURE_EMPLOYEES).length === 0);
+ok("PREF (metrics.js) has an entry for the mention kind", sandbox.PREF.mention === "mentioned");
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

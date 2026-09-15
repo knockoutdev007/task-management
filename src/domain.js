@@ -215,3 +215,25 @@ export function notificationRecipients(task, a, employees) {
   }
   return Array.from(out, ([employeeId, v]) => ({ employeeId, kind: v.kind, text: v.text }));
 }
+
+/**
+ * Who a comment's "@Name" tokens resolve to, so they can be notified
+ * directly — separate from notificationRecipients() above, since a mention
+ * can be buried anywhere in a long comment while the activity log only ever
+ * keeps a 200-char note, and mentioning someone matters regardless of
+ * whether they'd already be notified as the assignee/a manager/etc.
+ * Mirrors the display-highlighting regex in public/app/drawer.js — an
+ * "@First" or "@First Last" token, matched against employee names.
+ */
+export function mentionedEmployeeIds(text, employees) {
+  const found = new Set();
+  const re = /@([A-Za-z][\w.'-]*(?:\s[A-Z][\w.'-]*)?)/g;
+  let m;
+  while ((m = re.exec(String(text || "")))) {
+    const token = m[1].toLowerCase();
+    const match = employees.find(e => e.name.toLowerCase() === token)
+      || employees.find(e => e.name.toLowerCase().startsWith(token));
+    if (match) found.add(match.id);
+  }
+  return [...found];
+}

@@ -187,7 +187,8 @@ const NOTIFY_LABELS = [
   ["assigned", "A task is assigned to me"], ["priority", "A priority changes"], ["dueSoon", "A deadline is approaching"],
   ["overdue", "A task goes overdue"], ["blocked", "Someone reports a blocker"], ["comment", "Someone comments on my task"],
   ["reassigned", "A task is reassigned"], ["completed", "A task is completed"],
-  ["dependency", "I'm mentioned as someone who can help"], ["attachment", "Someone sends a file on my task"]
+  ["dependency", "I'm mentioned as someone who can help"], ["attachment", "Someone sends a file on my task"],
+  ["mentioned", "Someone @mentions me in a comment"]
 ];
 
 /* --------------------------------------------------------------------- state */

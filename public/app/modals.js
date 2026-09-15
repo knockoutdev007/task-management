@@ -183,19 +183,21 @@ function notifModal() {
       </button>`).join("") : emptyState("Nothing new", "You're up to date.")}</div>
   </div>`;
 }
+/** No close/dismiss affordance on purpose — this has to be responded to, not
+ *  dismissed. The only way past it is opening a listed task (data-open),
+ *  which replaces this layer with the task drawer; see the layerLocked
+ *  guard on closeLayer() in drawer.js. */
 function assignPopupModal({ actorName, tasks }) {
   const one = tasks.length === 1;
   return `<div class="modal" role="dialog" aria-modal="true" aria-label="Task assigned">
-    <div class="dh"><h2>${one ? "New task assigned" : `${tasks.length} new tasks assigned`}</h2>
-      <div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>
+    <div class="dh"><h2>${one ? "New task assigned" : `${tasks.length} new tasks assigned`}</h2></div>
     <div class="db" style="display:grid;gap:8px">
-      <p style="margin:0;font-size:13.5px"><strong>${esc(actorName)}</strong> assigned you:</p>
+      <p style="margin:0;font-size:13.5px"><strong>${esc(actorName)}</strong> assigned you ${one ? "this" : "these"} — open it to respond:</p>
       ${tasks.map(t => `<button class="sr-item notif" data-open="${esc(t.id)}" style="width:100%;align-items:flex-start">
         <span style="width:16px;text-align:center">•</span>
         <span style="flex:1;text-align:left"><span class="t" style="display:block">${esc(t.title)}</span></span>
       </button>`).join("")}
     </div>
-    <div class="df"><div class="sp"><button class="btn pri" data-close>Close</button></div></div>
   </div>`;
 }
 function accountModal() {

@@ -5,7 +5,7 @@
 function viewTeam() {
   if (S.empDetail) return viewEmployee(S.empDetail);
   const people = S.employees.slice().sort(by(e => e.name));
-  const loads = people.map(e => ({ e, w: workload(e.id), d: delivery(e.id, 4) }));
+  const loads = people.map(e => ({ e, w: workload(e.id) }));
   const byDept = {};
   loads.forEach(x => { const k = x.e.departmentId || "none"; (byDept[k] = byDept[k] || []).push(x); });
   return `
@@ -15,8 +15,8 @@ function viewTeam() {
     <section class="panel" style="margin-bottom:14px">
       <div class="panel-h"><h2>${esc(deptName(dept))}</h2><span class="hint">${rows.length} people</span></div>
       <div class="tw"><table class="t">
-        <thead><tr><th>Employee</th><th>Team</th><th class="c">Active</th><th class="c">Crit</th><th class="c">High</th><th class="c">Due today</th><th class="c">Overdue</th><th class="c">Blocked</th><th class="c">Stale</th><th class="c">Done / wk</th><th class="c">On-time</th><th class="c">Health</th><th class="c">Break today</th><th>Workload</th><th></th></tr></thead>
-        <tbody>${rows.map(({ e, w, d }) => { const ob = openBreakFor(e.id), brk = totalBreakSeconds(e.id, todayISO()); return `<tr>
+        <thead><tr><th>Employee</th><th>Team</th><th class="c">Active</th><th class="c">Crit</th><th class="c">High</th><th class="c">Due today</th><th class="c">Overdue</th><th class="c">Blocked</th><th class="c">Stale</th><th class="c">Done / wk</th><th class="c">Break today</th><th>Workload</th><th></th></tr></thead>
+        <tbody>${rows.map(({ e, w }) => { const ob = openBreakFor(e.id), brk = totalBreakSeconds(e.id, todayISO()); return `<tr>
           <td><span class="cellname">${av(e, "sm")}<span class="tx"><button class="linkish" data-emp="${esc(e.id)}">${esc(e.name)}</button><div style="font-size:10.5px;color:var(--ink-4)">${esc(e.title || "")}</div></span></span></td>
           <td style="font-size:11.5px">${esc(teamName(e.departmentId, e.teamId))}</td>
           <td class="c mono">${w.active}</td>
@@ -27,15 +27,12 @@ function viewTeam() {
           <td class="c mono" style="${w.blocked ? "color:var(--block);font-weight:600" : "color:var(--ink-4)"}">${w.blocked || "·"}</td>
           <td class="c mono" style="${w.stale ? "color:var(--warn)" : "color:var(--ink-4)"}">${w.stale || "·"}</td>
           <td class="c mono" style="${w.completedWeek ? "color:var(--ok)" : "color:var(--ink-4)"}">${w.completedWeek || "·"}</td>
-          <td class="c mono">${d.stats.onTimeRate == null ? "<span style='color:var(--ink-4)'>—</span>" : d.stats.onTimeRate + "%"}</td>
-          <td class="c mono" style="${d.score == null ? "color:var(--ink-4)" : d.score >= 75 ? "color:var(--ok)" : d.score >= 55 ? "color:var(--high)" : "color:var(--crit)"}">${d.score == null ? "—" : d.score}${d.reliable ? "" : "*"}</td>
           <td class="c mono" style="${ob ? "color:var(--warn);font-weight:600" : "color:var(--ink-4)"}">${ob ? "● " : ""}${fmtDuration(brk)}</td>
           <td>${wlBadge(w)}</td>
           <td class="r"><button class="btn sm" data-emp="${esc(e.id)}">Open</button></td>
         </tr>`; }).join("")}</tbody>
       </table></div>
-    </section>`).join("")}
-  <div class="note-box">* Delivery health marked with an asterisk is based on fewer than five tasks and should not be read as a performance signal. Open a person to see how each score is built.</div>`;
+    </section>`).join("")}`;
 }
 
 function viewEmployee(id) {

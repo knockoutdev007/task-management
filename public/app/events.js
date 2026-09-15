@@ -407,6 +407,55 @@ document.addEventListener("input", ev => {
     searchT = setTimeout(() => { S.filters.search = v; render(); const el = $("#f-search"); if (el) { el.focus(); el.setSelectionRange(v.length, v.length); } }, 220);
   }
   if (ev.target.id === "globalSearch") { S.q = ev.target.value; paintSearch(); }
+  if (ev.target.id === "cmt-body") paintMentions(ev.target);
+});
+
+/* ---- @mention autocomplete on the comment box ---- */
+/** The @token currently being typed, if the caret sits right after one:
+ *  an @ that's at the start of the text or preceded by whitespace, with
+ *  no whitespace between it and the caret. */
+function activeMentionToken(ta) {
+  const upTo = ta.value.slice(0, ta.selectionStart);
+  const m = upTo.match(/(?:^|\s)@([^\s@]*)$/);
+  return m ? { start: upTo.length - m[1].length - 1, query: m[1] } : null;
+}
+function paintMentions(ta) {
+  const pop = $("#mentionPop");
+  const tok = activeMentionToken(ta);
+  if (!pop || !tok) { if (pop) pop.hidden = true; return; }
+  const q = tok.query.toLowerCase();
+  const matches = S.employees.filter(e => e.active !== false && e.name.toLowerCase().includes(q)).slice(0, 6);
+  if (!matches.length) { pop.hidden = true; return; }
+  pop.innerHTML = matches.map(e => `<div class="sr-item" data-mention="${esc(e.id)}" data-mentionstart="${tok.start}">
+    ${av(e, "sm")}<span style="flex:1"><span class="t">${esc(e.name)}</span><span class="m">${esc(e.title || "")}</span></span></div>`).join("");
+  pop.hidden = false;
+}
+function insertMention(ta, empId, start) {
+  const e = emp(empId); if (!e) return;
+  const before = ta.value.slice(0, start), after = ta.value.slice(ta.selectionStart);
+  const insert = "@" + e.name + " ";
+  ta.value = before + insert + after;
+  const pos = before.length + insert.length;
+  ta.setSelectionRange(pos, pos);
+  ta.focus();
+  const pop = $("#mentionPop"); if (pop) pop.hidden = true;
+}
+document.addEventListener("mousedown", ev => {
+  const item = ev.target.closest("[data-mention]");
+  if (!item) return;
+  ev.preventDefault(); // keep the textarea's selection/focus intact through the click
+  const ta = $("#cmt-body");
+  if (ta) insertMention(ta, item.dataset.mention, Number(item.dataset.mentionstart));
+});
+document.addEventListener("keydown", ev => {
+  if (ev.target.id !== "cmt-body") return;
+  const pop = $("#mentionPop");
+  if (!pop || pop.hidden) return;
+  if (ev.key === "Escape") { pop.hidden = true; return; }
+  if (ev.key === "Enter" || ev.key === "Tab") {
+    const first = pop.querySelector("[data-mention]");
+    if (first) { ev.preventDefault(); insertMention(ev.target, first.dataset.mention, Number(first.dataset.mentionstart)); }
+  }
 });
 
 /* ---- global search ---- */
@@ -435,6 +484,7 @@ function paintSearch() {
 document.addEventListener("click", e => {
   if (!e.target.closest(".searchwrap")) { const p = $("#searchPop"); if (p) { p.hidden = true; } }
   if (e.target.closest("[data-open],[data-emp],[data-proj],[data-kpi]")) { const p = $("#searchPop"); if (p) p.hidden = true; }
+  if (e.target.id !== "cmt-body" && !e.target.closest("[data-mention]")) { const p = $("#mentionPop"); if (p) p.hidden = true; }
 });
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") { if (L().innerHTML) closeLayer(); const p = $("#searchPop"); if (p) p.hidden = true; }

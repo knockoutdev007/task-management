@@ -3,25 +3,35 @@
    LAYERS — drawer, modals
    ========================================================================== */
 const L = () => $("#layer");
-function closeLayer() { L().innerHTML = ""; document.body.style.overflow = ""; S.openTask = null; maybeShowAssignPopup(); }
-function openLayer(html) {
-  L().innerHTML = `<div class="scrim" data-close></div>${html}`;
+/** True while the open layer must be responded to, not dismissed (the
+ *  assignment popup) — closeLayer() becomes a no-op until something replaces
+ *  the layer outright (opening a task calls openLayer() directly, which
+ *  clears the lock), so Escape, the scrim, nav clicks etc. can't skip it. */
+let layerLocked = false;
+function closeLayer() {
+  if (layerLocked) return;
+  L().innerHTML = ""; document.body.style.overflow = ""; S.openTask = null; maybeShowAssignPopup();
+}
+function openLayer(html, locked = false) {
+  layerLocked = !!locked;
+  L().innerHTML = `<div class="scrim"${locked ? "" : " data-close"}></div>${html}`;
   document.body.style.overflow = "hidden";
   const first = L().querySelector("input,select,textarea,button:not([data-close])");
   if (first) setTimeout(() => first.focus(), 30);
 }
 
-/** A task-assignment popup stays open until the person closes it themselves,
- *  so it's queued rather than shown as a toast — and held back if some other
- *  layer (an edit form, another modal) is already open, so it can't clobber
- *  unsaved work. Multiple assignments while away are queued and shown one at a time. */
+/** A task-assignment popup stays open until the person responds to it —
+ *  see layerLocked above — so it's queued rather than shown as a toast, and
+ *  held back if some other layer (an edit form, another modal) is already
+ *  open, so it can't clobber unsaved work. Multiple assignments while away
+ *  are queued and shown one at a time. */
 function queueAssignPopup(actorName, tasks) {
   S.assignQueue.push({ actorName, tasks });
   maybeShowAssignPopup();
 }
 function maybeShowAssignPopup() {
   if (L().innerHTML || !S.assignQueue.length) return;
-  openLayer(assignPopupModal(S.assignQueue.shift()));
+  openLayer(assignPopupModal(S.assignQueue.shift()), true);
 }
 
 /* --------------------------------------------------------- task drawer */
@@ -151,7 +161,10 @@ function drawerComments(t) {
           <div class="cb">${body}</div></div></div>`;
       }).join("") || `<div class="empty" style="padding:14px">No comments yet.</div>`}
       <div style="display:grid;gap:7px;margin-top:11px;border-top:1px solid var(--line-soft);padding-top:11px">
-        <textarea class="inp" id="cmt-body" rows="2" placeholder="Add a comment. Type @ to mention someone."></textarea>
+        <div style="position:relative">
+          <textarea class="inp" id="cmt-body" rows="2" placeholder="Add a comment. Type @ to mention someone." style="width:100%"></textarea>
+          <div id="mentionPop" class="searchpop" hidden></div>
+        </div>
         <div style="display:flex;gap:8px;align-items:center">
           ${isManager() ? `<label style="font-size:11.5px;display:flex;gap:5px;align-items:center"><input type="checkbox" id="cmt-mgr">Flag as manager note</label>` : ""}
           <button class="btn pri" data-addcmt="${esc(t.id)}" style="margin-left:auto">Post comment</button>
