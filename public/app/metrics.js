@@ -84,8 +84,8 @@ const attnScore = t => { const a = attention(t); return a.length ? Math.max(...a
  *   priority weight  x  remaining-effort factor  x  deadline urgency
  * so one critical task due tomorrow outweighs six low-priority ones due next month.
  */
-function workload(empId) {
-  const mine = S.tasks.filter(t => t.assigneeId === empId);
+function workload(empId, taskFilter) {
+  const mine = S.tasks.filter(t => t.assigneeId === empId && (!taskFilter || taskFilter(t)));
   const open = mine.filter(isActive);
   let score = 0;
   open.forEach(t => {
@@ -115,6 +115,21 @@ function workload(empId) {
     completedToday: mine.filter(t => t.status === "COMPLETED" && (t.completedAt || "").slice(0, 10) === todayISO()).length,
     attention: open.filter(t => attention(t).length).length
   };
+}
+
+/** How a person's assigned tasks (minus cancelled) split across pending/active/blocked/completed. */
+function statusBreakdown(empId) {
+  const mine = S.tasks.filter(t => t.assigneeId === empId && t.status !== "CANCELLED");
+  const counts = { pending: 0, active: 0, blocked: 0, completed: 0 };
+  mine.forEach(t => {
+    const k = stat(t.status).kind;
+    if (k === "open") counts.pending++;
+    else if (k === "active") counts.active++;
+    else if (k === "blocked") counts.blocked++;
+    else if (k === "done") counts.completed++;
+  });
+  counts.total = mine.length;
+  return counts;
 }
 
 /** The task a person is most plausibly working on right now. */

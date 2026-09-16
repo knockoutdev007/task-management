@@ -158,7 +158,7 @@ function viewBoard() {
     <label class="lbl">Filter</label>
     <select id="f-assignee"><option value="">Everyone</option>${people.map(e => `<option value="${esc(e.id)}" ${S.filters.assignee === e.id ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>
     <select id="f-project"><option value="">All projects</option>${S.projects.map(p => `<option value="${esc(p.id)}" ${S.filters.project === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select>
-    <select id="f-priority"><option value="">Any priority</option>${cfg().priorities.map(p => `<option value="${esc(p.id)}" ${S.filters.priority === p.id ? "selected" : ""}>${esc(p.label)}</option>`).join("")}</select>
+    <select id="f-priority"><option value="">Any priority</option>${priorityOptions(S.filters.priority)}</select>
     <select id="f-flag"><option value="">No flag filter</option>
       ${[["active", "Open only"], ["overdue", "Overdue"], ["blocked", "Blocked"], ["stale", "No recent update"], ["critical", "Critical"], ["attention", "Needs attention"]]
         .map(([v, l]) => `<option value="${v}" ${S.filters.flag === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
@@ -216,8 +216,8 @@ function viewTasks() {
       <select id="f-dept"><option value="">All departments</option>${cfg().departments.map(d => `<option value="${esc(d.id)}" ${S.filters.dept === d.id ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select>
       <select id="f-team"><option value="">All teams</option>${teams.map(t => `<option value="${esc(t.id)}" ${S.filters.team === t.id ? "selected" : ""}>${esc(t.deptName)} / ${esc(t.name)}</option>`).join("")}</select>
       <select id="f-project"><option value="">All projects</option>${S.projects.map(p => `<option value="${esc(p.id)}" ${S.filters.project === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select>
-      <select id="f-priority"><option value="">Any priority</option>${cfg().priorities.map(p => `<option value="${esc(p.id)}" ${S.filters.priority === p.id ? "selected" : ""}>${esc(p.label)}</option>`).join("")}</select>
-      <select id="f-status"><option value="">Any status</option>${cfg().statuses.map(s => `<option value="${esc(s.id)}" ${S.filters.status === s.id ? "selected" : ""}>${esc(s.label)}</option>`).join("")}</select>
+      <select id="f-priority"><option value="">Any priority</option>${priorityOptions(S.filters.priority)}</select>
+      <select id="f-status"><option value="">Any status</option>${statusOptions(S.filters.status)}</select>
       <select id="f-due"><option value="">Any due date</option>
         ${[["today", "Due today"], ["tomorrow", "Due tomorrow"], ["week", "Due this week"], ["month", "Due this month"], ["overdue", "Overdue"], ["none", "No due date"]]
           .map(([v, l]) => `<option value="${v}" ${S.filters.due === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>

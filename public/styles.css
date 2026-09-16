@@ -554,6 +554,18 @@ textarea.inp { resize: vertical; min-height: 62px; line-height: 1.5; }
 .tab[aria-selected="true"] { color: var(--accent-ink); border-bottom-color: var(--accent); font-weight: 600; }
 .tab:hover { color: var(--ink); }
 
+/* ---------- segmented pill tabs (day board team filter) ---------- */
+.seg-tabs { display: flex; gap: 3px; flex-wrap: wrap; padding: 4px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--r-lg); margin-bottom: 12px; }
+.seg-tab {
+  display: flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: var(--r-md);
+  border: 1px solid transparent; background: none; font-size: 12.5px; font-weight: 500;
+  color: var(--ink-3); white-space: nowrap; transition: background .12s ease, color .12s ease;
+}
+.seg-tab:hover { color: var(--ink); background: var(--surface); }
+.seg-tab .n { font-size: 10px; font-weight: 700; color: var(--ink-4); background: var(--surface-sunk); border-radius: 20px; padding: 1px 6px; line-height: 1.4; }
+.seg-tab[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); font-weight: 600; box-shadow: var(--shadow-sm); }
+.seg-tab[aria-selected="true"] .n { background: var(--accent); color: var(--on-accent); }
+
 /* ---------- timeline ---------- */
 .tl { display: grid; gap: 0; }
 .tl-i { display: grid; grid-template-columns: 15px 1fr; gap: 9px; padding-bottom: 12px; position: relative; }

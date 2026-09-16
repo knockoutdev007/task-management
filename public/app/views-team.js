@@ -2,42 +2,94 @@
 /* ==========================================================================
    VIEW · TEAM
    ========================================================================== */
+const TEAM_COLS = [
+  ["name", "Employee", ""], ["team", "Team", ""], ["priority", "Priority", "c"], ["status", "Status", "c"],
+  ["crit", "Crit", "c"], ["high", "High", "c"], ["due", "Due today", "c"], ["overdue", "Overdue", "c"],
+  ["blocked", "Blocked", "c"], ["done", "Done / wk", "c"], ["break", "Break today", "c"]
+];
+const TEAM_SORTERS = {
+  name: ({ e }) => (e.name || "").toLowerCase(),
+  team: ({ e }) => teamName(e.departmentId, e.teamId).toLowerCase(),
+  priority: ({ cur }) => cur ? -prio(cur.priority).weight : Infinity,
+  status: ({ cur }) => cur ? cfg().statuses.findIndex(s => s.id === cur.status) : Infinity,
+  crit: ({ w }) => w.critical,
+  high: ({ w }) => w.high,
+  due: ({ w }) => w.dueToday,
+  overdue: ({ w }) => w.overdue,
+  blocked: ({ w }) => w.blocked,
+  done: ({ w }) => w.completedWeek,
+  break: ({ brk }) => brk
+};
+function sortTeamRows(list) {
+  const f = TEAM_SORTERS[S.teamSort.key] || TEAM_SORTERS.name;
+  return list.slice().sort(by(f, S.teamSort.dir));
+}
 function viewTeam() {
   if (S.empDetail) return viewEmployee(S.empDetail);
   const people = S.employees.slice().sort(by(e => e.name));
-  const loads = people.map(e => ({ e, w: workload(e.id) }));
+  const TF = S.teamFilters;
+  const loads = people.map(e => ({
+    e, w: workload(e.id), cur: currentTasks(e.id, 1)[0],
+    ob: openBreakFor(e.id), brk: totalBreakSeconds(e.id, todayISO())
+  }));
+  const shown = sortTeamRows(loads.filter(({ cur }) =>
+    (!TF.priority || (cur && cur.priority === TF.priority)) &&
+    (!TF.status || (cur && cur.status === TF.status))));
   const byDept = {};
-  loads.forEach(x => { const k = x.e.departmentId || "none"; (byDept[k] = byDept[k] || []).push(x); });
+  shown.forEach(x => { const k = x.e.departmentId || "none"; (byDept[k] = byDept[k] || []).push(x); });
+  const filtered = TF.priority || TF.status;
   return `
-  <div class="ph"><div><h1>Team</h1><div class="sub">${people.length} people across ${Object.keys(byDept).length} department${Object.keys(byDept).length === 1 ? "" : "s"}.</div></div>
+  <div class="ph"><div><h1>Team</h1><div class="sub">${filtered ? `${shown.length} of ${people.length} people match the filter` : `${people.length} people across ${Object.keys(byDept).length} department${Object.keys(byDept).length === 1 ? "" : "s"}`}.</div></div>
     <div class="sp"><button class="btn" data-export="team">${icon("dl")}Export</button><button class="btn pri" data-newemp>${icon("plus")}Add person</button></div></div>
-  ${Object.entries(byDept).map(([dept, rows]) => `
+  ${priorityStatusFilterBar("team", TF, "clearteamfilters", `<span class="fcount">${shown.length} shown</span>`)}
+  ${shown.length ? Object.entries(byDept).map(([dept, rows]) => `
     <section class="panel" style="margin-bottom:14px">
       <div class="panel-h"><h2>${esc(deptName(dept))}</h2><span class="hint">${rows.length} people</span></div>
       <div class="tw"><table class="t">
-        <thead><tr><th>Employee</th><th>Team</th><th class="c">Active</th><th class="c">Crit</th><th class="c">High</th><th class="c">Due today</th><th class="c">Overdue</th><th class="c">Blocked</th><th class="c">Stale</th><th class="c">Done / wk</th><th class="c">Break today</th><th>Workload</th><th></th></tr></thead>
-        <tbody>${rows.map(({ e, w }) => { const ob = openBreakFor(e.id), brk = totalBreakSeconds(e.id, todayISO()); return `<tr>
+        <thead><tr>${TEAM_COLS.map(([k, l, cls]) => `<th class="${cls ? cls + " " : ""}sortable" data-teamsort="${k}">${esc(l)}${S.teamSort.key === k ? `<span class="caret"> ${S.teamSort.dir > 0 ? "▲" : "▼"}</span>` : ""}</th>`).join("")}<th></th></tr></thead>
+        <tbody>${rows.map(({ e, w, cur, ob, brk }) => `<tr>
           <td><span class="cellname">${av(e, "sm")}<span class="tx"><button class="linkish" data-emp="${esc(e.id)}">${esc(e.name)}</button><div style="font-size:10.5px;color:var(--ink-4)">${esc(e.title || "")}</div></span></span></td>
           <td style="font-size:11.5px">${esc(teamName(e.departmentId, e.teamId))}</td>
-          <td class="c mono">${w.active}</td>
+          <td class="c">${cur ? pPill(cur.priority) : "<span style='color:var(--ink-4)'>·</span>"}</td>
+          <td class="c">${cur ? sChip(cur.status) : "<span style='color:var(--ink-4)'>·</span>"}</td>
           <td class="c mono" style="${w.critical ? "color:var(--crit);font-weight:600" : "color:var(--ink-4)"}">${w.critical || "·"}</td>
           <td class="c mono" style="${w.high ? "color:var(--high)" : "color:var(--ink-4)"}">${w.high || "·"}</td>
           <td class="c mono">${w.dueToday || "<span style='color:var(--ink-4)'>·</span>"}</td>
           <td class="c mono" style="${w.overdue ? "color:var(--crit);font-weight:600" : "color:var(--ink-4)"}">${w.overdue || "·"}</td>
           <td class="c mono" style="${w.blocked ? "color:var(--block);font-weight:600" : "color:var(--ink-4)"}">${w.blocked || "·"}</td>
-          <td class="c mono" style="${w.stale ? "color:var(--warn)" : "color:var(--ink-4)"}">${w.stale || "·"}</td>
           <td class="c mono" style="${w.completedWeek ? "color:var(--ok)" : "color:var(--ink-4)"}">${w.completedWeek || "·"}</td>
           <td class="c mono" style="${ob ? "color:var(--warn);font-weight:600" : "color:var(--ink-4)"}">${ob ? "● " : ""}${fmtDuration(brk)}</td>
-          <td>${wlBadge(w)}</td>
           <td class="r"><button class="btn sm" data-emp="${esc(e.id)}">Open</button></td>
-        </tr>`; }).join("")}</tbody>
+        </tr>`).join("")}</tbody>
       </table></div>
-    </section>`).join("")}`;
+    </section>`).join("") : emptyState("No one matches this filter", "Try a different priority or status.")}`;
 }
 
+function donutChart(b) {
+  if (!b.total) return `<div style="font-size:12px;color:var(--ink-4)">No tasks assigned yet.</div>`;
+  const slices = [["Pending", b.pending, "var(--ink-4)"], ["Active", b.active, "var(--accent)"],
+    ["Blocked", b.blocked, "var(--block)"], ["Completed", b.completed, "var(--ok)"]].filter(([, n]) => n);
+  let off = 25;
+  const segs = slices.map(([, n, color]) => {
+    const pct = (n / b.total) * 100, seg =
+      `<circle r="15.9155" cx="21" cy="21" fill="transparent" stroke="${color}" stroke-width="6" stroke-dasharray="${pct} ${100 - pct}" stroke-dashoffset="${off}"/>`;
+    off -= pct; return seg;
+  }).join("");
+  const legend = slices.map(([label, n, color]) => `<span style="display:flex;gap:5px;align-items:center">
+    <i style="width:9px;height:9px;background:${color};border-radius:2px;display:block"></i>${esc(label)}
+    <span class="mono" style="color:var(--ink-4)">${n}</span></span>`).join("");
+  return `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+    <svg class="spark" viewBox="0 0 42 42" width="110" height="110" role="img"
+      aria-label="Task breakdown: ${slices.map(([l, n]) => `${l} ${n}`).join(", ")} of ${b.total} total">
+      ${segs}
+      <text x="21" y="21" text-anchor="middle" dominant-baseline="central" font-size="8" font-weight="700" fill="var(--ink-2)" font-family="IBM Plex Mono, monospace">${b.total}</text>
+    </svg>
+    <div style="display:flex;flex-direction:column;gap:6px;font-size:11.5px;color:var(--ink-3)">${legend}</div>
+  </div>`;
+}
 function viewEmployee(id) {
   const e = emp(id); if (!e) { S.empDetail = null; return viewTeam(); }
-  const w = workload(id), d = delivery(id, 4);
+  const w = workload(id), d = delivery(id, 4), b = statusBreakdown(id);
   const mine = S.tasks.filter(t => t.assigneeId === id);
   const open = mine.filter(isActive).sort((a, b) => attnScore(b) - attnScore(a) || prio(b.priority).weight - prio(a.priority).weight);
   const done = mine.filter(t => t.status === "COMPLETED").sort(by(t => t.completedAt || "", -1)).slice(0, 12);
@@ -77,6 +129,8 @@ function viewEmployee(id) {
         }).join("") || `<tr><td colspan="5">${emptyState("Nothing completed yet", "")}</td></tr>`}</tbody></table></div></section>
     </div>
     <div class="stack">
+      <section class="panel"><div class="panel-h"><h2>Task breakdown</h2><span class="hint">${b.total} task${b.total === 1 ? "" : "s"} total</span></div>
+        <div class="panel-b">${donutChart(b)}</div></section>
       <section class="panel"><div class="panel-h"><h2>Delivery signals</h2><span class="hint">last 4 weeks</span></div>
         <div class="panel-b">${deliveryPanel(d)}</div></section>
       <section class="panel"><div class="panel-h"><h2>Break history</h2><span class="hint">most recent ${brks.length}</span></div>
@@ -224,17 +278,39 @@ function viewDayBoard() {
   const offset = Math.min(0, S.dayBoardOffset || 0);
   const isToday = offset === 0;
   const date = iso(addDays(new Date(), offset));
-  const people = S.employees.filter(e => e.active !== false).slice().sort(by(e => e.name));
+  const allPeople = S.employees.filter(e => e.active !== false).slice().sort(by(e => e.name));
+
+  const countFor = id => allPeople.filter(e => {
+    if (!id) return true;
+    if (id === "unassigned") return !e.teamId;
+    const [deptId, teamId] = id.split("|");
+    return e.departmentId === deptId && e.teamId === teamId;
+  }).length;
+  const selected = S.dayBoardTeam || "";
+  const tabs = [{ id: "", label: "All" }, ...allTeams().map(t => ({ id: `${t.deptId}|${t.id}`, label: t.name }))]
+    .filter(t => t.id === "" || t.id === selected || countFor(t.id) > 0);
+  if (allPeople.some(e => !e.teamId)) tabs.push({ id: "unassigned", label: "Unassigned" });
+
+  const people = allPeople.filter(e => {
+    if (!selected) return true;
+    if (selected === "unassigned") return !e.teamId;
+    const [deptId, teamId] = selected.split("|");
+    return e.departmentId === deptId && e.teamId === teamId;
+  });
+
   const rows = people.map(e => ({ e, u: myUpdates(e.id).find(x => x.date === date) }));
   return `
   <div class="ph"><div><h1>Day plan board</h1>
-    <div class="sub">What everyone ${isToday ? "'s doing today" : "posted"}, ${people.length} people, one screen.</div></div>
+    <div class="sub">What everyone ${isToday ? "'s doing today" : "posted"}, ${allPeople.length} people, one screen.</div></div>
     <div class="sp" style="align-items:center">
       <button class="btn sm" data-dayboard="-1">${icon("clock")}← Previous day</button>
       <input class="inp" type="date" id="dayboard-date" value="${date}" max="${todayISO()}" style="width:150px">
       <button class="btn sm" data-dayboard="1" ${isToday ? "disabled" : ""}>Next day →</button>
       <button class="btn sm pri" data-dayboard="0" ${isToday ? "disabled" : ""}>Today</button>
     </div></div>
+  <div class="seg-tabs">
+    ${tabs.map(t => `<button class="seg-tab" data-dayteam="${esc(t.id)}" aria-selected="${selected === t.id}">${esc(t.label)}<span class="n">${countFor(t.id)}</span></button>`).join("")}
+  </div>
   <section class="panel"><div class="panel-h"><h2>${esc(fmtDate(date, { absolute: true }))}</h2><span class="hint">${rows.filter(r => r.u).length} of ${people.length} checked in</span></div>
     <div class="panel-b" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">
       ${rows.map(({ e, u }) => { const items = u ? planItems(u) : []; const done = items.filter(it => it.done).length;
@@ -243,7 +319,7 @@ function viewDayBoard() {
           ${items.length ? `<span style="margin-left:auto;font-size:11px;color:var(--ink-4)">${done}/${items.length}</span>` : ""}</div>
         ${items.length ? items.map(it => `<div style="font-size:12.5px;${it.done ? "text-decoration:line-through;color:var(--ink-4)" : ""}">${esc(it.text)}</div>`).join("")
           : `<div style="font-size:12.5px;color:var(--ink-4)">${isToday ? "No check-in yet today" : "No check-in that day"}</div>`}
-      </div>`; }).join("") || emptyState("No one on the team yet", "")}
+      </div>`; }).join("") || emptyState("No one on this team yet", "")}
     </div></section>`;
 }
 function summaryText() {

@@ -4,6 +4,21 @@
    ========================================================================== */
 const pPill = p => `<span class="pill p-${esc(p)}">${esc(prio(p).label)}</span>`;
 const sChip = s => `<span class="st st-${esc(s)}">${esc(stat(s).label)}</span>`;
+function priorityOptions(selected) {
+  return cfg().priorities.map(p => `<option value="${esc(p.id)}" ${selected === p.id ? "selected" : ""}>${esc(p.label)}</option>`).join("");
+}
+function statusOptions(selected, list) {
+  return (list || cfg().statuses).map(s => `<option value="${esc(s.id)}" ${selected === s.id ? "selected" : ""}>${esc(s.label)}</option>`).join("");
+}
+function priorityStatusFilterBar(prefix, state, clearAttr, note) {
+  return `<section class="panel" style="margin-bottom:12px"><div class="fbar">
+    <label class="lbl">Filter</label>
+    <select id="f-${prefix}-priority"><option value="">Any priority</option>${priorityOptions(state.priority)}</select>
+    <select id="f-${prefix}-status"><option value="">Any status</option>${statusOptions(state.status)}</select>
+    <button class="btn sm" data-${clearAttr}>Clear</button>
+    ${note || ""}
+  </div></section>`;
+}
 function pBar(t) {
   const f = flags(t), v = t.progress || 0;
   const cls = t.status === "COMPLETED" ? "done" : f.overdue ? "late" : f.behind >= 30 ? "risk" : "";

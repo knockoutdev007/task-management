@@ -233,9 +233,9 @@ function taskForm(existing, presetAssignee) {
             <option value="">Follow the assignee</option>
             ${teams.map(x => `<option value="${esc(x.deptId)}|${esc(x.id)}" ${t.departmentId === x.deptId && t.teamId === x.id ? "selected" : ""}>${esc(x.deptName)} / ${esc(x.name)}</option>`).join("")}</select></div>
         <div class="field"><label for="tf-priority">Priority</label>
-          <select class="inp" id="tf-priority">${cfg().priorities.map(p => `<option value="${esc(p.id)}" ${t.priority === p.id ? "selected" : ""}>${esc(p.label)}</option>`).join("")}</select></div>
+          <select class="inp" id="tf-priority">${priorityOptions(t.priority)}</select></div>
         <div class="field"><label for="tf-status">Status</label>
-          <select class="inp" id="tf-status">${cfg().statuses.map(s => `<option value="${esc(s.id)}" ${t.status === s.id ? "selected" : ""}>${esc(s.label)}</option>`).join("")}</select></div>
+          <select class="inp" id="tf-status">${statusOptions(t.status)}</select></div>
       </div>
       <div class="frow f3">
         <div class="field"><label for="tf-start">Start date</label><input class="inp" type="date" id="tf-start" value="${esc(t.startDate || "")}"></div>

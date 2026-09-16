@@ -71,7 +71,7 @@ function progressModal(t) {
         <div class="chips" id="pg-steps">${PROGRESS_STEPS.map(p => `<button class="chip" data-pg="${p}" aria-pressed="${(t.progress || 0) === p}">${p}%</button>`).join("")}</div></div>
       <div class="frow">
         <div class="field"><label for="pg-status">Status</label>
-          <select class="inp" id="pg-status">${cfg().statuses.map(s => `<option value="${esc(s.id)}" ${t.status === s.id ? "selected" : ""}>${esc(s.label)}</option>`).join("")}</select></div>
+          <select class="inp" id="pg-status">${statusOptions(t.status)}</select></div>
         <div class="field"><label for="pg-hours">Total hours spent</label>
           <input class="inp" type="number" min="0" step="0.5" id="pg-hours" value="${esc(t.actualHours ?? "")}"></div>
       </div>
@@ -149,9 +149,9 @@ function bulkModal() {
       </div>
       <div class="frow f3">
         <div class="field"><label for="bk-priority">Priority</label><select class="inp" id="bk-priority"><option value="">No change</option>
-          ${cfg().priorities.map(p => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join("")}</select></div>
+          ${priorityOptions("")}</select></div>
         <div class="field"><label for="bk-status">Status</label><select class="inp" id="bk-status"><option value="">No change</option>
-          ${cfg().statuses.filter(s => s.id !== "BLOCKED").map(s => `<option value="${esc(s.id)}">${esc(s.label)}</option>`).join("")}</select></div>
+          ${statusOptions("", cfg().statuses.filter(s => s.id !== "BLOCKED"))}</select></div>
         <div class="field"><label for="bk-due">Due date</label><input class="inp" type="date" id="bk-due"></div>
       </div>
       <div class="field"><label for="bk-note">Add a comment to each</label><input class="inp" id="bk-note" placeholder="Optional"></div>

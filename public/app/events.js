@@ -2,7 +2,8 @@
 /* ==========================================================================
    EVENTS
    ========================================================================== */
-function go(view) { S.view = view; store.set("view", view); S.empDetail = null; S.projDetail = null; closeLayer(); render(); $("#view").focus(); }
+function go(view) { S.view = view; store.set("view", view); S.empDetail = null; S.projDetail = null; S.dayBoardTeam = ""; closeLayer(); render(); $("#view").focus(); }
+function persistState(key) { store.set(key, S[key]); return render(); }
 function setFilterFromKpi(spec) {
   if (!spec) return;
   const [k, v] = spec.split(":");
@@ -12,11 +13,12 @@ function setFilterFromKpi(spec) {
   if (k === "status") S.filters.status = v;
   if (k === "completed") S.filters.completed = v;
   if (!isManager()) S.filters.assignee = meId();
+  store.set("filters", S.filters);
   go("tasks");
 }
 
 document.addEventListener("click", async ev => {
-  const el = ev.target.closest("[data-newtask],[data-view],[data-go],[data-kpi],[data-open],[data-close],[data-tab],[data-account],[data-savepw],[data-logout],[data-copytemp],[data-resetpw],[data-emp],[data-proj],[data-projtasks],[data-newfor],[data-newemp],[data-editemp],[data-newproj],[data-delproj],[data-edittask],[data-savetask],[data-deltask],[data-complete],[data-reopen],[data-blockit],[data-saveblocker],[data-unblock],[data-quickprog],[data-saveprogress],[data-pg],[data-setprog],[data-addcmt],[data-addlink],[data-savelink],[data-dellink],[data-delatt],[data-adddep],[data-savedep],[data-toggledep],[data-deldep],[data-saveemp],[data-saveproj],[data-bulk],[data-savebulk],[data-quick],[data-pick],[data-export],[data-week],[data-clearfilters],[data-blockfilter],[data-sort],[data-copysummary],[data-dayboard],[data-addplan],[data-toggleplan],[data-delplan],[data-prefillplan],[data-adddept],[data-deldept],[data-addteam],[data-delteam],[data-addstatus],[data-delstatus],[data-wd]");
+  const el = ev.target.closest("[data-newtask],[data-view],[data-go],[data-kpi],[data-open],[data-close],[data-tab],[data-account],[data-savepw],[data-logout],[data-copytemp],[data-resetpw],[data-emp],[data-proj],[data-projtasks],[data-newfor],[data-newemp],[data-editemp],[data-newproj],[data-delproj],[data-edittask],[data-savetask],[data-deltask],[data-complete],[data-reopen],[data-blockit],[data-saveblocker],[data-unblock],[data-quickprog],[data-saveprogress],[data-pg],[data-setprog],[data-addcmt],[data-addlink],[data-savelink],[data-dellink],[data-delatt],[data-adddep],[data-savedep],[data-toggledep],[data-deldep],[data-saveemp],[data-saveproj],[data-bulk],[data-savebulk],[data-quick],[data-pick],[data-export],[data-week],[data-clearfilters],[data-clearteamfilters],[data-clearovfilters],[data-blockfilter],[data-sort],[data-teamsort],[data-copysummary],[data-dayboard],[data-addplan],[data-toggleplan],[data-delplan],[data-prefillplan],[data-adddept],[data-deldept],[data-addteam],[data-delteam],[data-addstatus],[data-delstatus],[data-wd],[data-dayteam]");
   if (!el) return;
   const d = el.dataset;
 
@@ -48,7 +50,7 @@ document.addEventListener("click", async ev => {
   }
   if ("emp" in d) { S.empDetail = d.emp || null; S.view = "team"; store.set("view", "team"); closeLayer(); return render(); }
   if ("proj" in d) { S.projDetail = d.proj || null; S.view = "projects"; store.set("view", "projects"); closeLayer(); return render(); }
-  if (d.projtasks) { S.filters = Object.assign({}, S.filters, { project: d.projtasks }); return go("tasks"); }
+  if (d.projtasks) { S.filters = Object.assign({}, S.filters, { project: d.projtasks }); store.set("filters", S.filters); return go("tasks"); }
   if (d.week != null && d.week !== "") {
     S.analyticsWeek = d.week === "0" ? 0 : Math.min(0, S.analyticsWeek + Number(d.week));
     return render();
@@ -57,9 +59,13 @@ document.addEventListener("click", async ev => {
     S.dayBoardOffset = d.dayboard === "0" ? 0 : Math.min(0, (S.dayBoardOffset || 0) + Number(d.dayboard));
     return render();
   }
-  if ("clearfilters" in d) { S.filters = { assignee: "", dept: "", team: "", project: "", priority: "", status: "", flag: "", due: "", search: "", completed: "", minProgress: "", maxProgress: "" }; return render(); }
-  if (d.blockfilter) { S.filters.flag = S.filters.flag === "manager" ? "" : "manager"; return render(); }
-  if (d.sort) { if (S.sort.key === d.sort) S.sort.dir *= -1; else S.sort = { key: d.sort, dir: 1 }; return render(); }
+  if ("dayteam" in d) { S.dayBoardTeam = d.dayteam; return render(); }
+  if ("clearfilters" in d) { S.filters = { assignee: "", dept: "", team: "", project: "", priority: "", status: "", flag: "", due: "", search: "", completed: "", minProgress: "", maxProgress: "" }; return persistState("filters"); }
+  if ("clearteamfilters" in d) { S.teamFilters = { priority: "", status: "" }; return persistState("teamFilters"); }
+  if ("clearovfilters" in d) { S.ovFilters = { priority: "", status: "" }; return persistState("ovFilters"); }
+  if (d.blockfilter) { S.filters.flag = S.filters.flag === "manager" ? "" : "manager"; return persistState("filters"); }
+  if (d.sort) { if (S.sort.key === d.sort) S.sort.dir *= -1; else S.sort = { key: d.sort, dir: 1 }; return persistState("sort"); }
+  if (d.teamsort) { if (S.teamSort.key === d.teamsort) S.teamSort.dir *= -1; else S.teamSort = { key: d.teamsort, dir: 1 }; return persistState("teamSort"); }
   if (d.export) return doExport(d.export);
   if ("copysummary" in d) {
     try { await navigator.clipboard.writeText(summaryText()); toast("Summary copied to clipboard"); }
@@ -373,7 +379,11 @@ document.addEventListener("change", ev => {
   }
   const F = S.filters;
   const map = { "f-assignee": "assignee", "f-dept": "dept", "f-team": "team", "f-project": "project", "f-priority": "priority", "f-status": "status", "f-due": "due", "f-flag": "flag", "f-completed": "completed", "f-minp": "minProgress", "f-maxp": "maxProgress" };
-  if (map[id]) { F[map[id]] = t.value; return render(); }
+  if (map[id]) { F[map[id]] = t.value; return persistState("filters"); }
+  const teamMap = { "f-team-priority": "priority", "f-team-status": "status" };
+  if (teamMap[id]) { S.teamFilters[teamMap[id]] = t.value; return persistState("teamFilters"); }
+  const ovMap = { "f-ov-priority": "priority", "f-ov-status": "status" };
+  if (ovMap[id]) { S.ovFilters[ovMap[id]] = t.value; return persistState("ovFilters"); }
   if (id === "selAll") {
     const rows = applyFilters(visibleTasks());
     if (t.checked) rows.forEach(r => S.selection.add(r.id)); else rows.forEach(r => S.selection.delete(r.id));
@@ -404,7 +414,7 @@ document.addEventListener("input", ev => {
   if (ev.target.id === "f-search") {
     clearTimeout(searchT);
     const v = ev.target.value;
-    searchT = setTimeout(() => { S.filters.search = v; render(); const el = $("#f-search"); if (el) { el.focus(); el.setSelectionRange(v.length, v.length); } }, 220);
+    searchT = setTimeout(() => { S.filters.search = v; store.set("filters", S.filters); render(); const el = $("#f-search"); if (el) { el.focus(); el.setSelectionRange(v.length, v.length); } }, 220);
   }
   if (ev.target.id === "globalSearch") { S.q = ev.target.value; paintSearch(); }
   if (ev.target.id === "cmt-body") paintMentions(ev.target);

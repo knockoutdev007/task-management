@@ -5,7 +5,12 @@
 function viewControlCenter() {
   const ts = visibleTasks(), k = teamKPIs(ts);
   const people = S.employees.filter(e => e.active !== false);
-  const loads = people.map(e => ({ e, w: workload(e.id) })).sort((a, b) => b.w.score - a.w.score);
+
+  const OF = S.ovFilters;
+  const ovActive = OF.priority || OF.status;
+  const matchesOV = t => (!OF.priority || t.priority === OF.priority) && (!OF.status || t.status === OF.status);
+
+  const loads = people.map(e => ({ e, w: workload(e.id, ovActive ? matchesOV : null) })).sort((a, b) => b.w.score - a.w.score);
   const loadGroups = (() => {
     const teams = allTeams();
     const groups = teams.map(t => ({ label: t.name, rows: loads.filter(({ e }) => e.teamId === t.id && e.departmentId === t.deptId) }))
@@ -16,9 +21,11 @@ function viewControlCenter() {
     return groups;
   })();
 
-  const attnTasks = ts.filter(t => isActive(t) && attention(t).length).sort((a, b) => attnScore(b) - attnScore(a));
-  const recent = ts.filter(t => t.status === "COMPLETED").sort(by(t => t.completedAt || "", -1)).slice(0, 8);
-  const upcoming = ts.filter(isActive).filter(t => { const f = flags(t); return f.dueToday || f.dueIn7 || f.overdue; }).sort(by(t => t.dueDate || "9999"));
+  const attnTasks = ts.filter(t => isActive(t) && attention(t).length && matchesOV(t)).sort((a, b) => attnScore(b) - attnScore(a));
+  const recent = ts.filter(t => t.status === "COMPLETED" && matchesOV(t)).sort(by(t => t.completedAt || "", -1)).slice(0, 8);
+  const upcoming = ts.filter(isActive).filter(t => matchesOV(t) && (() => { const f = flags(t); return f.dueToday || f.dueIn7 || f.overdue; })()).sort(by(t => t.dueDate || "9999"));
+  const cwoFilter = ovActive ? matchesOV : null;
+  const cwoPeople = cwoFilter ? people.filter(e => currentTasks(e.id, 50).some(cwoFilter)) : people;
 
   return `
   <div class="ph">
@@ -42,12 +49,14 @@ function viewControlCenter() {
     { label: "Due this week",  value: k.dueWeek,        tone: "med",   filter: "due:week",          detail: "next 7 days" }
   ])}
 
+  ${priorityStatusFilterBar("ov", OF, "clearovfilters", `<span class="hint">Narrows Team workload, Requires attention, Upcoming deadlines, Recently completed and Currently working on below.</span>`)}
+
   <div class="cc-grid">
     <div class="stack">
       <section class="panel">
         <div class="panel-h">
           <h2>Team workload</h2>
-          <span class="hint">weighted by priority, remaining effort and deadline — not task count</span>
+          <span class="hint">${ovActive ? "counts reflect the active filter" : "weighted by priority, remaining effort and deadline — not task count"}</span>
           <div class="sp"><button class="btn sm" data-go="team">Detail</button></div>
         </div>
         <div class="tw"><table class="t">
@@ -88,9 +97,9 @@ function viewControlCenter() {
       </section>
 
       <section class="panel">
-        <div class="panel-h"><h2>Currently working on</h2><span class="hint">top-priority open task per person</span>
+        <div class="panel-h"><h2>Currently working on</h2><span class="hint">${cwoFilter ? `${cwoPeople.length} match${cwoPeople.length === 1 ? "" : "es"} the filter` : "top-priority open task per person"}</span>
           <div class="sp"><button class="btn sm" data-go="working">See all</button></div></div>
-        <div class="panel-b"><div class="cwo">${people.slice(0, 6).map(e => workCard(e, 1)).join("")}</div></div>
+        <div class="panel-b"><div class="cwo">${cwoPeople.slice(0, 6).map(e => workCard(e, 1, cwoFilter)).join("") || emptyState("No one matches this filter", "Try a different priority or status.")}</div></div>
       </section>
     </div>
 
@@ -127,17 +136,19 @@ function greeting() {
   return (h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening") + (n ? ", " + n : "");
 }
 
-function workCard(e, n) {
-  const cur = currentTasks(e.id, 3);
+function workCard(e, n, filter) {
+  const allCur = currentTasks(e.id, filter ? 50 : n);
+  const cur = (filter ? allCur.filter(filter) : allCur).slice(0, n);
   const w = workload(e.id);
   const upd = latestUpdate(e.id);
   const ob = openBreakFor(e.id);
   const breakBadge = ob ? `<span class="flag st">${icon("clock")}On break · ${fmtDuration(Math.round((Date.now() - dOf(ob.startedAt).getTime()) / 1000))}</span>` : "";
   if (!cur.length) {
+    const noMatch = filter && allCur.length;
     return `<article class="wcard idle">
       <div class="wc-h">${av(e)}<div><div class="nm">${esc(e.name)}</div><div class="ro">${esc(e.title || "")}</div></div>${breakBadge ? `<span style="margin-left:auto">${breakBadge}</span>` : ""}</div>
-      <div class="wc-b"><div style="font-size:12px;color:var(--ink-4)">No open tasks. ${w.completedWeek ? w.completedWeek + " completed this week." : "Capacity available."}</div>
-      <button class="btn sm" data-newfor="${esc(e.id)}">${icon("plus")}Assign work</button></div>
+      <div class="wc-b"><div style="font-size:12px;color:var(--ink-4)">${noMatch ? "No open task matches the current filter." : `No open tasks. ${w.completedWeek ? w.completedWeek + " completed this week." : "Capacity available."}`}</div>
+      ${noMatch ? "" : `<button class="btn sm" data-newfor="${esc(e.id)}">${icon("plus")}Assign work</button>`}</div>
     </article>`;
   }
   const t = cur[0], f = flags(t);
