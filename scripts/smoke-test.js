@@ -32,7 +32,7 @@ function client() {
     return { status: r.status, data };
   };
 }
-const login = async (call, email) => (await call("POST", "/api/auth/login", { email, password: PASSWORD })).status;
+const login = async (call, username) => (await call("POST", "/api/auth/login", { username, password: PASSWORD })).status;
 
 console.log(`\nTeam Control Center — API checks against ${BASE}\n`);
 
@@ -41,11 +41,11 @@ const anon = client();
 ok("anonymous cannot read the board", (await anon("GET", "/api/bootstrap")).status === 401);
 ok("anonymous cannot write a task", (await anon("PUT", "/api/tasks/TSK-0001", { title: "x" })).status === 401);
 ok("wrong password is rejected",
-   (await anon("POST", "/api/auth/login", { email: "asha.raman@lghomecomfort.ca", password: "nope" })).status === 401);
+   (await anon("POST", "/api/auth/login", { username: "asha.raman", password: "nope" })).status === 401);
 
 /* ---------------------------------------------------------------- manager */
 const mgr = client();
-ok("manager signs in", await login(mgr, "asha.raman@lghomecomfort.ca") === 200);
+ok("manager signs in", await login(mgr, "asha.raman") === 200);
 const boot = await mgr("GET", "/api/bootstrap");
 ok("bootstrap returns the whole board",
    boot.status === 200 && boot.data.tasks.length > 40 && boot.data.employees.length === 10,
@@ -91,7 +91,7 @@ ok("department follows the assignee", r.data.task.departmentId === ravi.departme
 
 /* ------------------------------------------------------------- employee */
 const emp = client();
-ok("employee signs in", await login(emp, "ravi.menon@lghomecomfort.ca") === 200);
+ok("employee signs in", await login(emp, "ravi.menon") === 200);
 
 r = await emp("PATCH", `/api/tasks/${TASK}`, { progress: 50, status: "IN_PROGRESS", actualHours: 3 });
 ok("employee updates their own task", r.status === 200 && r.data.task.progress === 50);
@@ -118,7 +118,7 @@ ok("employee CANNOT complete someone else's task", r.status === 403, `got ${r.st
 r = await emp("PUT", "/api/config", { workload: { normal: 1, high: 2, overloaded: 3 } });
 ok("employee CANNOT change settings", r.status === 403);
 
-r = await emp("PUT", `/api/employees/${ravi.id}`, { name: "Ravi Menon", email: "ravi.menon@lghomecomfort.ca", role: "manager" });
+r = await emp("PUT", `/api/employees/${ravi.id}`, { name: "Ravi Menon", username: "ravi.menon", role: "manager" });
 ok("employee CANNOT promote themselves", r.status === 403);
 
 r = await emp("DELETE", `/api/tasks/${TASK}`);
@@ -167,13 +167,14 @@ ok("settings with impossible workload bands are refused", r.status === 422);
 r = await mgr("PUT", "/api/config", { statuses: [{ id: "NOT_STARTED", label: "Not started", kind: "open" }] });
 ok("a status still in use cannot be deleted", r.status === 409 || r.status === 422, `got ${r.status}`);
 
-r = await mgr("PUT", `/api/employees/emp-new-person`, { name: "Test Person", email: "test.person@lghomecomfort.ca", role: "employee", departmentId: "mkt", teamId: "seo" });
-ok("manager adds a person and gets a one-time password", r.status === 200 && !!r.data.temporaryPassword);
+r = await mgr("PUT", `/api/employees/emp-new-person`, { name: "Test Person", username: "test.person", role: "employee", departmentId: "mkt", teamId: "seo" });
+ok("manager adds a person and gets a one-time password", r.status === 200 && !!r.data.temporaryPassword && r.data.employee.username === "test.person");
 const TEMP_PW = r.data.temporaryPassword;
-r = await mgr("PUT", `/api/employees/emp-new-person-2`, { name: "Clash", email: "test.person@lghomecomfort.ca" });
-ok("a duplicate email is refused", r.status === 409);
+r = await mgr("PUT", `/api/employees/emp-new-person-2`, { name: "Clash", username: "test.person" });
+ok("a duplicate User ID is auto-disambiguated, not refused",
+   r.status === 200 && r.data.employee.username === "test.person2", `got ${r.status} username=${r.data.employee?.username}`);
 r = await mgr("PUT", `/api/employees/${boot.data.employees.find(e => e.role === "manager").id}`,
-              { name: "Asha Raman", email: "asha.raman@lghomecomfort.ca", role: "employee" });
+              { name: "Asha Raman", username: "asha.raman", role: "employee" });
 ok("the last manager cannot demote themselves", r.status === 409);
 
 r = await mgr("DELETE", `/api/tasks/${forced}`);
@@ -181,7 +182,7 @@ ok("manager CAN delete a task", r.status === 200);
 
 /* ------------------------------------------------------------- passwords */
 const fresh = client();
-r = await fresh("POST", "/api/auth/login", { email: "test.person@lghomecomfort.ca", password: TEMP_PW });
+r = await fresh("POST", "/api/auth/login", { username: "test.person", password: TEMP_PW });
 ok("a new person signs in with their temporary password", r.status === 200);
 ok("they are told to change it", r.data.me && r.data.me.mustChangePassword === true);
 r = await fresh("POST", "/api/auth/password", { current: "wrong", next: "a-much-longer-password" });

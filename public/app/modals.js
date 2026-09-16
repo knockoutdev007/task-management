@@ -88,14 +88,14 @@ function progressModal(t) {
 }
 function employeeModal(e) {
   const isNew = !e;
-  e = e || { id: uid("emp"), name: "", email: "", role: "employee", title: "", departmentId: cfg().departments[0] ? cfg().departments[0].id : "", teamId: "", capacityHours: 40, active: true };
+  e = e || { id: uid("emp"), name: "", username: "", role: "employee", title: "", departmentId: cfg().departments[0] ? cfg().departments[0].id : "", teamId: "", capacityHours: 40, active: true };
   const teams = allTeams();
   return `<div class="modal" role="dialog" aria-modal="true" aria-label="${isNew ? "Add person" : "Edit person"}">
     <div class="dh"><h2>${isNew ? "Add a person" : "Edit " + esc(e.name)}</h2><div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>
     <div class="db">
       <div class="frow">
         <div class="field"><label for="ef-name">Full name</label><input class="inp" id="ef-name" value="${esc(e.name)}"></div>
-        <div class="field"><label for="ef-email">Work email</label><input class="inp" type="email" id="ef-email" value="${esc(e.email || "")}" required>
+        <div class="field"><label for="ef-username">User ID</label><input class="inp" type="text" id="ef-username" value="${esc(e.username || "")}" required ${isNew ? "" : 'data-touched="1"'}>
           <div class="hlp">This is how they sign in.</div></div>
       </div>
       <div class="frow">
@@ -207,7 +207,7 @@ function accountModal() {
     <div class="db">
       <div style="display:flex;gap:11px;align-items:center">${av(e, "lg")}
         <div><div style="font-weight:600;font-size:14px">${esc(e.name)}</div>
-          <div style="font-size:12px;color:var(--ink-3)">${esc(e.email)} · ${esc(e.role === "manager" ? "Manager" : e.title || "Employee")}</div></div></div>
+          <div style="font-size:12px;color:var(--ink-3)">${esc(e.username)} · ${esc(e.role === "manager" ? "Manager" : e.title || "Employee")}</div></div></div>
       <div class="panel"><div class="panel-h"><h2>Change password</h2></div>
         <div class="panel-b" style="display:grid;gap:10px">
           ${e.mustChangePassword ? `<div class="hlp" style="color:var(--warn)">You're using the temporary password you were given. Please set your own.</div>` : ""}
@@ -246,7 +246,7 @@ function showTempPassword(person, password) {
         replace it after signing in. <strong>It is shown once</strong> — if you lose it, reset the password again.</p>
       <div class="mono" style="font-size:19px;letter-spacing:.04em;padding:13px 15px;border:1px dashed var(--accent-line);
         border-radius:var(--r-md);background:var(--accent-soft);color:var(--accent-ink);text-align:center;user-select:all">${esc(password)}</div>
-      <div class="dl"><dt>Sign in with</dt><dd class="mono">${esc(person ? person.email : "")}</dd></div>
+      <div class="dl"><dt>Sign in with</dt><dd class="mono">${esc(person ? person.username : "")}</dd></div>
     </div>
     <div class="df"><div class="sp"><button class="btn" data-copytemp="${esc(password)}">Copy password</button>
       <button class="btn pri" data-close>Done</button></div></div>

@@ -10,6 +10,8 @@ const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const uid = p => p + "-" + Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 6);
+/** Live-suggest a User ID from a full name while typing; the server has the final say on collisions. */
+const slugUsername = name => String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "");
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 const sum = (a, f) => a.reduce((t, x) => t + (f ? f(x) : x), 0);
 const by = (f, dir = 1) => (a, b) => { const x = f(a), y = f(b); return x < y ? -dir : x > y ? dir : 0; };

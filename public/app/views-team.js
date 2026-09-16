@@ -98,7 +98,7 @@ function viewEmployee(id) {
   return `
   <div class="ph">
     <div style="display:flex;gap:12px;align-items:center">${av(e, "lg")}
-      <div><h1>${esc(e.name)}</h1><div class="sub">${esc(e.title || "")} · ${esc(deptName(e.departmentId))} / ${esc(teamName(e.departmentId, e.teamId))} · ${esc(e.email || "")}</div></div></div>
+      <div><h1>${esc(e.name)}</h1><div class="sub">${esc(e.title || "")} · ${esc(deptName(e.departmentId))} / ${esc(teamName(e.departmentId, e.teamId))} · ${esc(e.username || "")}</div></div></div>
     <div class="sp"><button class="btn" data-emp="">← Team</button>
       <button class="btn" data-newfor="${esc(e.id)}">${icon("plus")}Assign task</button>
       ${canAdmin() ? `<button class="btn" data-editemp="${esc(e.id)}">${icon("edit")}Edit</button>` : ""}</div>

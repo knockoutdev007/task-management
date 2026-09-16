@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS employees (
   id                   TEXT PRIMARY KEY,
   name                 TEXT NOT NULL,
   initials             TEXT NOT NULL DEFAULT '',
-  email                TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  username             TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash        TEXT,                       -- null until the first password is set
   must_change_password INTEGER NOT NULL DEFAULT 0,
   role                 TEXT NOT NULL DEFAULT 'employee' CHECK (role IN ('manager','employee')),

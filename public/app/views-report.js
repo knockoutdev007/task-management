@@ -281,7 +281,7 @@ function viewSettings() {
         <div class="sp"><button class="btn sm" data-newemp>${icon("plus")}Add person</button></div></div>
         <div class="tw"><table class="t"><thead><tr><th>Name</th><th>Role</th><th>Team</th><th class="c">Active</th><th></th></tr></thead>
           <tbody>${S.employees.map(e => `<tr>
-            <td>${personCell(e.id)}<div style="font-size:10.5px;color:var(--ink-4);padding-left:27px">${esc(e.email || "")}</div></td>
+            <td>${personCell(e.id)}<div style="font-size:10.5px;color:var(--ink-4);padding-left:27px">${esc(e.username || "")}</div></td>
             <td><span class="pill ${e.role === "manager" ? "p-HIGH" : "p-LOW"}">${esc(e.role)}</span></td>
             <td style="font-size:11.5px">${esc(deptName(e.departmentId))} / ${esc(teamName(e.departmentId, e.teamId))}</td>
             <td class="c">${e.active === false ? "<span style='color:var(--ink-4)'>no</span>" : "yes"}</td>

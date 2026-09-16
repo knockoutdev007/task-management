@@ -17,14 +17,12 @@ export function mountAdmin(app, requireUser, requireManager) {
   app.put("/api/employees/:id", requireUser, requireManager, (req, res) => {
     const b = req.body || {};
     const name = String(b.name || "").trim();
-    const email = String(b.email || "").trim().toLowerCase();
     if (!name) return res.status(422).json({ error: "A name is required." });
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(422).json({ error: "A valid email is required — it's how they sign in." });
-
-    const clash = store.getEmployeeByEmail(email);
-    if (clash && clash.id !== req.params.id) return res.status(409).json({ error: "Someone else already uses that email." });
-
     const existing = store.getEmployee(req.params.id);
+    const requested = String(b.username || "").trim().toLowerCase() || store.slugifyName(name);
+    const clash = store.getEmployeeByUsername(requested);
+    const username = (clash && clash.id !== req.params.id) ? store.usernameFor(requested, req.params.id) : requested;
+
     // Don't let the last manager demote or deactivate themselves out of the system.
     if (existing && existing.role === "manager" && (b.role !== "manager" || b.active === false)) {
       const managers = store.listEmployees().filter(e => e.role === "manager" && e.active).length;
@@ -32,7 +30,7 @@ export function mountAdmin(app, requireUser, requireManager) {
     }
 
     const saved = store.upsertEmployee({
-      id: req.params.id, name, email, initials: initialsOf(name),
+      id: req.params.id, name, username, initials: initialsOf(name),
       role: b.role === "manager" ? "manager" : "employee",
       title: b.title || "", departmentId: b.departmentId || "", teamId: b.teamId || "",
       managerId: b.managerId || null, capacityHours: Number(b.capacityHours) || 40,

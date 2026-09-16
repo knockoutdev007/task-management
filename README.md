@@ -134,9 +134,11 @@ lock yourself out.
 
 ## Authentication
 
-Email and password, hashed with bcrypt (cost 12), server-side sessions in the
+User ID and password, hashed with bcrypt (cost 12), server-side sessions in the
 `sessions` table, signed httpOnly `SameSite=Lax` cookie. Failed logins are
-throttled per email+IP.
+throttled per User ID+IP. The User ID is auto-generated from a person's full
+name (lowercase, dot-separated, e.g. `John Doe` → `john.doe`, deduped with a
+trailing number on collision) — no email address is collected or stored.
 
 Adding someone in Settings → People returns a temporary password **once**. Pass
 it to them; they are prompted to replace it on first sign-in. Lost it? Reset the

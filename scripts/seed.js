@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, upsertEmployee, upsertProject, upsertTask, addComment, addActivity,
-         upsertUpdate, setConfig, listEmployees, setPassword } from "../src/db.js";
+         upsertUpdate, setConfig, listEmployees, setPassword, usernameForBatch } from "../src/db.js";
 import { hashPassword } from "../src/auth.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -53,9 +53,10 @@ if (RESET) {
 const seed = db.transaction(() => {
   setConfig(read("config", "settings.json"));
 
+  const takenUsernames = new Set();
   for (const f of files("employees")) {
     const id = f.replace(".json", ""), e = read("employees", f);
-    upsertEmployee({ ...e, id });
+    upsertEmployee({ ...e, id, username: usernameForBatch(e.name, takenUsernames) });
     setPassword(id, hashPassword(PASSWORD), 1);          // must change on first sign-in
   }
   for (const f of files("projects")) {
@@ -91,7 +92,7 @@ console.log(`
   Everyone's starting password is:  ${PASSWORD}
   They are prompted to change it after signing in.
 
-  Sign in as the manager:  ${managers.map(m => m.email).join(", ")}
+  Sign in as the manager:  ${managers.map(m => m.username).join(", ")}
 
   Replace this demo team with your own in Settings → People,
   then bulk-reassign or delete the demo tasks from All tasks.

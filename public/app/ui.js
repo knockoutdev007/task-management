@@ -218,9 +218,9 @@ function loginScreen() {
   return `<form class="login" id="loginForm" autocomplete="on">
     <div class="login-mark">${icon("grid")}</div>
     <h1>Marketing Team</h1>
-    <p class="login-sub">Sign in with your work email. If you don’t have a password yet, ask your manager to add you.</p>
-    <div class="field"><label for="li-email">Email</label>
-      <input class="inp" id="li-email" name="email" type="email" autocomplete="username" required autofocus></div>
+    <p class="login-sub">Sign in with your User ID. If you don’t have a password yet, ask your manager to add you.</p>
+    <div class="field"><label for="li-username">User ID</label>
+      <input class="inp" id="li-username" name="username" type="text" autocomplete="username" required autofocus></div>
     <div class="field"><label for="li-pw">Password</label>
       <input class="inp" id="li-pw" name="password" type="password" autocomplete="current-password" required></div>
     <div id="li-err"></div>

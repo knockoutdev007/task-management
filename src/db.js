@@ -67,7 +67,7 @@ export function setConfig(value) {
 /* --------------------------------------------------------------- employees */
 
 const employeeOut = r => r && ({
-  id: r.id, name: r.name, initials: r.initials, email: r.email,
+  id: r.id, name: r.name, initials: r.initials, username: r.username,
   role: r.role, title: r.title,
   departmentId: r.department_id, teamId: r.team_id, managerId: r.manager_id,
   capacityHours: r.capacity_hours, color: r.color,
@@ -82,27 +82,117 @@ export const listEmployees = () =>
   db.prepare("SELECT * FROM employees ORDER BY name").all().map(employeeOut);
 export const getEmployee = id =>
   employeeOut(db.prepare("SELECT * FROM employees WHERE id = ?").get(id));
-export const getEmployeeByEmail = email =>
-  db.prepare("SELECT * FROM employees WHERE email = ? COLLATE NOCASE").get(String(email || "").trim());
+export const getEmployeeByUsername = username =>
+  db.prepare("SELECT * FROM employees WHERE username = ? COLLATE NOCASE").get(String(username || "").trim());
 export const getPasswordHash = id =>
   (db.prepare("SELECT password_hash FROM employees WHERE id = ?").get(id) || {}).password_hash;
+
+/** lowercase, collapse non-alphanumeric runs to ".", trim edge dots. Pure — no DB access. */
+export const slugifyName = name =>
+  String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "") || "user";
+
+/** Turn "John Doe" into a unique User ID ("john.doe", "john.doe2", ...) against the live table. */
+export function usernameFor(name, excludeId) {
+  const base = slugifyName(name);
+  const taken = new Set(
+    db.prepare("SELECT id, username FROM employees").all()
+      .filter(r => r.id !== excludeId)
+      .map(r => r.username.toLowerCase())
+  );
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(base + n)) n++;
+  return base + n;
+}
+/** Same dedup rule as usernameFor, but against an in-memory set — for building a batch (e.g. a migration) at once. */
+export function usernameForBatch(name, takenSet) {
+  const base = slugifyName(name);
+  let candidate = base, n = 2;
+  while (takenSet.has(candidate)) candidate = base + n++;
+  takenSet.add(candidate);
+  return candidate;
+}
+
+/**
+ * One-time migration: older databases still have `employees.email` instead of
+ * `username`. schema.sql's CREATE TABLE IF NOT EXISTS is a no-op against an
+ * existing table, so this runs once here instead. No-op on any database
+ * already on the current schema (including a brand-new, empty one).
+ */
+(function migrateEmailToUsername() {
+  const cols = db.prepare("PRAGMA table_info(employees)").all().map(c => c.name);
+  if (!cols.includes("email") || cols.includes("username")) return;
+
+  const rows = db.prepare("SELECT * FROM employees").all();
+  const taken = new Set();
+  const withUsername = rows.map(r => ({ ...r, username: usernameForBatch(r.name, taken) }));
+
+  const migrate = db.transaction(() => {
+    db.exec(`
+      CREATE TABLE employees_new (
+        id                   TEXT PRIMARY KEY,
+        name                 TEXT NOT NULL,
+        initials             TEXT NOT NULL DEFAULT '',
+        username             TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        password_hash        TEXT,
+        must_change_password INTEGER NOT NULL DEFAULT 0,
+        role                 TEXT NOT NULL DEFAULT 'employee' CHECK (role IN ('manager','employee')),
+        title                TEXT NOT NULL DEFAULT '',
+        department_id        TEXT NOT NULL DEFAULT '',
+        team_id              TEXT NOT NULL DEFAULT '',
+        manager_id           TEXT REFERENCES employees(id) ON DELETE SET NULL,
+        capacity_hours       INTEGER NOT NULL DEFAULT 40,
+        color                TEXT NOT NULL DEFAULT '#0E7C86',
+        active               INTEGER NOT NULL DEFAULT 1,
+        last_login_at        TEXT,
+        created_at           TEXT NOT NULL,
+        updated_at           TEXT NOT NULL
+      );
+    `);
+    const insert = db.prepare(`
+      INSERT INTO employees_new (id, name, initials, username, password_hash, must_change_password,
+        role, title, department_id, team_id, manager_id, capacity_hours, color, active, last_login_at,
+        created_at, updated_at)
+      VALUES (@id, @name, @initials, @username, @password_hash, @must_change_password,
+        @role, @title, @department_id, @team_id, @manager_id, @capacity_hours, @color, @active, @last_login_at,
+        @created_at, @updated_at)
+    `);
+    for (const r of withUsername) insert.run(r);
+    db.exec(`
+      DROP TABLE employees;
+      ALTER TABLE employees_new RENAME TO employees;
+      CREATE INDEX IF NOT EXISTS idx_employees_active ON employees(active);
+      CREATE INDEX IF NOT EXISTS idx_employees_team   ON employees(department_id, team_id);
+    `);
+  });
+
+  // foreign_keys can only be toggled outside a transaction, hence these sit
+  // before/after migrate() rather than inside it.
+  db.pragma("foreign_keys = OFF");
+  migrate();
+  db.pragma("foreign_keys = ON");
+  const violations = db.pragma("foreign_key_check");
+  if (violations.length) throw new Error("employees username migration broke a foreign key: " + JSON.stringify(violations));
+
+  console.log(`Migrated ${withUsername.length} employee(s) from email to a generated User ID.`);
+})();
 
 export function upsertEmployee(e) {
   const t = now();
   const existing = db.prepare("SELECT id, created_at FROM employees WHERE id = ?").get(e.id);
   db.prepare(`
-    INSERT INTO employees (id, name, initials, email, role, title, department_id, team_id,
+    INSERT INTO employees (id, name, initials, username, role, title, department_id, team_id,
                            manager_id, capacity_hours, color, active, created_at, updated_at)
-    VALUES (@id, @name, @initials, @email, @role, @title, @department_id, @team_id,
+    VALUES (@id, @name, @initials, @username, @role, @title, @department_id, @team_id,
             @manager_id, @capacity_hours, @color, @active, @created_at, @updated_at)
     ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name, initials = excluded.initials, email = excluded.email,
+      name = excluded.name, initials = excluded.initials, username = excluded.username,
       role = excluded.role, title = excluded.title, department_id = excluded.department_id,
       team_id = excluded.team_id, manager_id = excluded.manager_id,
       capacity_hours = excluded.capacity_hours, color = excluded.color,
       active = excluded.active, updated_at = excluded.updated_at
   `).run({
-    id: e.id, name: e.name, initials: e.initials || "", email: e.email,
+    id: e.id, name: e.name, initials: e.initials || "", username: e.username,
     role: e.role === "manager" ? "manager" : "employee", title: e.title || "",
     department_id: e.departmentId || "", team_id: e.teamId || "",
     manager_id: e.managerId || null, capacity_hours: e.capacityHours || 40,

@@ -1,5 +1,5 @@
 /**
- * Email + password authentication with a server-side session table and an
+ * User ID + password authentication with a server-side session table and an
  * httpOnly cookie. No third-party identity provider, so nobody needs an
  * account anywhere else to use this.
  *
@@ -9,7 +9,7 @@
 import bcrypt from "bcryptjs";
 import { randomUUID, randomBytes, timingSafeEqual, createHmac } from "node:crypto";
 import {
-  getEmployeeByEmail, getEmployee, getPasswordHash, setPassword,
+  getEmployeeByUsername, getEmployee, getPasswordHash, setPassword,
   createSession, readSession, dropSession, dropSessionsFor, touchLogin, purgeSessions
 } from "./db.js";
 
@@ -91,14 +91,14 @@ export function mountAuth(app) {
   setInterval(purgeSessions, 3600_000).unref();
 
   app.post("/api/auth/login", (req, res) => {
-    const email = String(req.body?.email || "").trim().toLowerCase();
+    const username = String(req.body?.username || "").trim().toLowerCase();
     const password = String(req.body?.password || "");
-    const key = email + "|" + (req.ip || "");
+    const key = username + "|" + (req.ip || "");
     if (tooMany(key)) return res.status(429).json({ error: "Too many attempts. Wait 15 minutes and try again." });
 
-    const row = getEmployeeByEmail(email);
+    const row = getEmployeeByUsername(username);
     const ok = row && row.active && row.password_hash && bcrypt.compareSync(password, row.password_hash);
-    if (!ok) { noteAttempt(key); return res.status(401).json({ error: "That email and password don't match." }); }
+    if (!ok) { noteAttempt(key); return res.status(401).json({ error: "That User ID and password don't match." }); }
 
     attempts.delete(key);
     const sid = randomUUID();

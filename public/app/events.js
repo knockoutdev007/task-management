@@ -233,7 +233,7 @@ document.addEventListener("click", async ev => {
     const name = $("#ef-name").value.trim();
     if (!name) { toast("A name is required.", true); return; }
     const [dept, team] = ($("#ef-team").value || "|").split("|");
-    Object.assign(base, { name, initials: initials(name), email: $("#ef-email").value.trim(), title: $("#ef-title").value.trim(),
+    Object.assign(base, { name, initials: initials(name), username: $("#ef-username").value.trim(), title: $("#ef-title").value.trim(),
       role: $("#ef-role").value, departmentId: dept, teamId: team, capacityHours: Number($("#ef-cap").value) || 40,
       active: $("#ef-active").checked, color: base.color || avColor(base.id) });
     const saved = await saveEmployee(base);
@@ -418,6 +418,11 @@ document.addEventListener("input", ev => {
   }
   if (ev.target.id === "globalSearch") { S.q = ev.target.value; paintSearch(); }
   if (ev.target.id === "cmt-body") paintMentions(ev.target);
+  if (ev.target.id === "ef-name") {
+    const u = $("#ef-username");
+    if (u && !u.dataset.touched) u.value = slugUsername(ev.target.value);
+  }
+  if (ev.target.id === "ef-username") ev.target.dataset.touched = "1";
 });
 
 /* ---- @mention autocomplete on the comment box ---- */
@@ -473,7 +478,7 @@ function paintSearch() {
   const pop = $("#searchPop"), q = S.q.trim().toLowerCase();
   if (!q || !S.me) { pop.hidden = true; pop.className = ""; return; }
   const tasks = visibleTasks().filter(t => (t.id + " " + t.title + " " + (t.description || "") + " " + (t.tags || []).join(" ")).toLowerCase().includes(q)).slice(0, 8);
-  const people = isManager() ? S.employees.filter(e => (e.name + " " + (e.title || "") + " " + (e.email || "")).toLowerCase().includes(q)).slice(0, 5) : [];
+  const people = isManager() ? S.employees.filter(e => (e.name + " " + (e.title || "") + " " + (e.username || "")).toLowerCase().includes(q)).slice(0, 5) : [];
   const projects = S.projects.filter(p => (p.name + " " + (p.code || "")).toLowerCase().includes(q)).slice(0, 5);
   const statuses = cfg().statuses.filter(s => s.label.toLowerCase().includes(q)).slice(0, 3);
   const prios = cfg().priorities.filter(p => p.label.toLowerCase().includes(q)).slice(0, 3);
@@ -536,11 +541,11 @@ document.addEventListener("drop", async e => {
 document.addEventListener("submit", async ev => {
   if (ev.target.id !== "loginForm") return;
   ev.preventDefault();
-  const btn = $("#li-go"), email = $("#li-email").value.trim(), pw = $("#li-pw").value;
+  const btn = $("#li-go"), username = $("#li-username").value.trim(), pw = $("#li-pw").value;
   const err = m => { const e = $("#li-err"); if (e) e.innerHTML = `<div class="hlp err">${esc(m)}</div>`; };
-  if (!email || !pw) return err("Enter your email and password.");
+  if (!username || !pw) return err("Enter your User ID and password.");
   btn.disabled = true; btn.textContent = "Signing in…";
-  const problem = await login(email, pw);
+  const problem = await login(username, pw);
   if (problem) {
     const b = $("#li-go");
     if (b) { b.disabled = false; b.textContent = "Sign in"; }

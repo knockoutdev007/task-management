@@ -127,8 +127,8 @@ async function refresh(collections) {
 
 /* ------------------------------------------------------------- auth flow */
 
-async function login(email, password) {
-  const r = await POST("/api/auth/login", { email, password });
+async function login(username, password) {
+  const r = await POST("/api/auth/login", { username, password });
   if (!r.ok) return explain(r, "Couldn't sign in.");
   await initData();
   return null;
