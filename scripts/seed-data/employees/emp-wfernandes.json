@@ -1,0 +1,12 @@
+{
+ "name": "Wilson Fernandes",
+ "initials": "WF",
+ "role": "employee",
+ "title": "Senior SEO Executive",
+ "departmentId": "mkt",
+ "teamId": "seo",
+ "managerId": null,
+ "capacityHours": 40,
+ "color": "#0E7C86",
+ "active": true
+}

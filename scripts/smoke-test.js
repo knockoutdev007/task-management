@@ -41,20 +41,20 @@ const anon = client();
 ok("anonymous cannot read the board", (await anon("GET", "/api/bootstrap")).status === 401);
 ok("anonymous cannot write a task", (await anon("PUT", "/api/tasks/TSK-0001", { title: "x" })).status === 401);
 ok("wrong password is rejected",
-   (await anon("POST", "/api/auth/login", { username: "asha.raman", password: "nope" })).status === 401);
+   (await anon("POST", "/api/auth/login", { username: "roshani.shinde", password: "nope" })).status === 401);
 
 /* ---------------------------------------------------------------- manager */
 const mgr = client();
-ok("manager signs in", await login(mgr, "asha.raman") === 200);
+ok("manager signs in", await login(mgr, "roshani.shinde") === 200);
 const boot = await mgr("GET", "/api/bootstrap");
 ok("bootstrap returns the whole board",
-   boot.status === 200 && boot.data.tasks.length > 40 && boot.data.employees.length === 10,
+   boot.status === 200 && boot.data.tasks.length > 25 && boot.data.employees.length === 19,
    `tasks=${boot.data?.tasks?.length} people=${boot.data?.employees?.length}`);
 ok("password hashes never leave the server",
    !JSON.stringify(boot.data).match(/password_hash|\$2[aby]\$/));
 
-const ravi = boot.data.employees.find(e => e.name === "Ravi Menon");
-const mira = boot.data.employees.find(e => e.name === "Mira Gupta");
+const ravi = boot.data.employees.find(e => e.name === "Wilson Fernandes");
+const mira = boot.data.employees.find(e => e.name === "Moinul Khan");
 
 /* ------------------------------------------------------------- validation */
 let r = await mgr("POST", "/api/tasks", { title: "", assigneeId: ravi.id, priority: "MEDIUM", status: "NOT_STARTED", progress: 0 });
@@ -76,7 +76,7 @@ ok("a blocked task must say what is blocking it", r.status === 422 && !!r.data.f
 /* ------------------------------------------------------------- happy path */
 r = await mgr("POST", "/api/tasks", {
   title: "Verify furnace landing page tracking", description: "Before the budget step-up.",
-  assigneeId: ravi.id, projectId: "prj-q4-campaigns", category: "Audit",
+  assigneeId: ravi.id, projectId: "prj-q4-heating", category: "Audit",
   priority: "HIGH", status: "NOT_STARTED", progress: 0,
   startDate: new Date().toISOString().slice(0, 10),
   dueDate: new Date(Date.now() + 6 * 864e5).toISOString().slice(0, 10),
@@ -91,7 +91,7 @@ ok("department follows the assignee", r.data.task.departmentId === ravi.departme
 
 /* ------------------------------------------------------------- employee */
 const emp = client();
-ok("employee signs in", await login(emp, "ravi.menon") === 200);
+ok("employee signs in", await login(emp, "wilson.fernandes") === 200);
 
 r = await emp("PATCH", `/api/tasks/${TASK}`, { progress: 50, status: "IN_PROGRESS", actualHours: 3 });
 ok("employee updates their own task", r.status === 200 && r.data.task.progress === 50);
@@ -118,7 +118,7 @@ ok("employee CANNOT complete someone else's task", r.status === 403, `got ${r.st
 r = await emp("PUT", "/api/config", { workload: { normal: 1, high: 2, overloaded: 3 } });
 ok("employee CANNOT change settings", r.status === 403);
 
-r = await emp("PUT", `/api/employees/${ravi.id}`, { name: "Ravi Menon", username: "ravi.menon", role: "manager" });
+r = await emp("PUT", `/api/employees/${ravi.id}`, { name: "Wilson Fernandes", username: "wilson.fernandes", role: "manager" });
 ok("employee CANNOT promote themselves", r.status === 403);
 
 r = await emp("DELETE", `/api/tasks/${TASK}`);
@@ -173,9 +173,16 @@ const TEMP_PW = r.data.temporaryPassword;
 r = await mgr("PUT", `/api/employees/emp-new-person-2`, { name: "Clash", username: "test.person" });
 ok("a duplicate User ID is auto-disambiguated, not refused",
    r.status === 200 && r.data.employee.username === "test.person2", `got ${r.status} username=${r.data.employee?.username}`);
-r = await mgr("PUT", `/api/employees/${boot.data.employees.find(e => e.role === "manager").id}`,
-              { name: "Asha Raman", username: "asha.raman", role: "employee" });
-ok("the last manager cannot demote themselves", r.status === 409);
+// the seed has two managers; demote every OTHER manager first (never the one this
+// client is signed in as, until the very last step) so the "last manager" guard
+// can actually be exercised without losing our own manager session along the way
+const seedManagers = boot.data.employees.filter(e => e.role === "manager");
+const self = seedManagers.find(e => e.name === "Roshani Shinde");
+for (const m of seedManagers.filter(e => e.id !== self.id)) {
+  await mgr("PUT", `/api/employees/${m.id}`, { name: m.name, username: m.username, role: "employee" });
+}
+r = await mgr("PUT", `/api/employees/${self.id}`, { name: self.name, username: self.username, role: "employee" });
+ok("the last manager cannot demote themselves", r.status === 409, `got ${r.status}`);
 
 r = await mgr("DELETE", `/api/tasks/${forced}`);
 ok("manager CAN delete a task", r.status === 200);

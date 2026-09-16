@@ -1,0 +1,12 @@
+{
+ "name": "Sarvesh Bhosale",
+ "initials": "SB",
+ "role": "employee",
+ "title": "Email marketing & automation specialist",
+ "departmentId": "mkt",
+ "teamId": "email",
+ "managerId": null,
+ "capacityHours": 40,
+ "color": "#0E7C86",
+ "active": true
+}

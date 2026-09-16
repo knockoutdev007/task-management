@@ -1,0 +1,9 @@
+{
+ "name": "Lifecycle & Seasonal Email",
+ "code": "EML",
+ "ownerId": "emp-psherve",
+ "description": "Automation, segmentation and campaign builds in Marketing Cloud for the heating season send calendar.",
+ "startDate": "2026-08-22",
+ "targetDate": "2026-10-18",
+ "status": "ACTIVE"
+}

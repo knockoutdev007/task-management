@@ -1,0 +1,12 @@
+{
+ "name": "Avinash Tippanna Padsalgi",
+ "initials": "AT",
+ "role": "employee",
+ "title": "Graphic Designer",
+ "departmentId": "mkt",
+ "teamId": "design",
+ "managerId": null,
+ "capacityHours": 40,
+ "color": "#0E7C86",
+ "active": true
+}

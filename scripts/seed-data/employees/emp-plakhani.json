@@ -1,0 +1,12 @@
+{
+ "name": "Param Lakhani",
+ "initials": "PL",
+ "role": "employee",
+ "title": "SEO Content Writer",
+ "departmentId": "mkt",
+ "teamId": "content",
+ "managerId": null,
+ "capacityHours": 40,
+ "color": "#0E7C86",
+ "active": true
+}

@@ -1,9 +1,0 @@
-{
- "name": "Brand and Collateral Refresh",
- "code": "BRD",
- "ownerId": "emp-lena",
- "description": "New visual system rolled through the site, print collateral and vehicle livery.",
- "startDate": "2026-08-17",
- "targetDate": "2026-10-25",
- "status": "ACTIVE"
-}

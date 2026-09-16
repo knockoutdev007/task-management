@@ -1,9 +1,0 @@
-{
- "name": "Q4 Heating Campaigns",
- "code": "ADS",
- "ownerId": "emp-tomas",
- "description": "Search, display and remarketing for the furnace and heat-pump season.",
- "startDate": "2026-08-23",
- "targetDate": "2026-11-11",
- "status": "ACTIVE"
-}

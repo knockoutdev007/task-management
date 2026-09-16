@@ -1,0 +1,12 @@
+{
+ "name": "Rina Nadar",
+ "initials": "RN",
+ "role": "employee",
+ "title": "Salesforce Marketing Cloud Executive",
+ "departmentId": "mkt",
+ "teamId": "email",
+ "managerId": null,
+ "capacityHours": 40,
+ "color": "#0E7C86",
+ "active": true
+}

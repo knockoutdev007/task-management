@@ -1,0 +1,12 @@
+{
+ "name": "Priyanka Kochrekar",
+ "initials": "PK",
+ "role": "employee",
+ "title": "UI/UX Designer",
+ "departmentId": "mkt",
+ "teamId": "design",
+ "managerId": null,
+ "capacityHours": 40,
+ "color": "#0E7C86",
+ "active": true
+}

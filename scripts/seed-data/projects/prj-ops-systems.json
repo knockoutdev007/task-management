@@ -1,9 +1,0 @@
-{
- "name": "Internal Systems Cleanup",
- "code": "OPS",
- "ownerId": "emp-samuel",
- "description": "CRM hygiene, document templates, onboarding paperwork and IT access review.",
- "startDate": "2026-08-29",
- "targetDate": "2026-10-20",
- "status": "ACTIVE"
-}

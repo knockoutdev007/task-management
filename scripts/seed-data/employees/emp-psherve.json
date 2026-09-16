@@ -1,0 +1,12 @@
+{
+ "name": "Parmeshwar Sherve",
+ "initials": "PS",
+ "role": "employee",
+ "title": "Email marketing Executive",
+ "departmentId": "mkt",
+ "teamId": "email",
+ "managerId": null,
+ "capacityHours": 40,
+ "color": "#0E7C86",
+ "active": true
+}

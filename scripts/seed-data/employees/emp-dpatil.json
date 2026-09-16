@@ -1,0 +1,12 @@
+{
+ "name": "Devendra Rajendra Patil",
+ "initials": "DR",
+ "role": "employee",
+ "title": "Web developer",
+ "departmentId": "mkt",
+ "teamId": "webdev",
+ "managerId": null,
+ "capacityHours": 40,
+ "color": "#0E7C86",
+ "active": true
+}
