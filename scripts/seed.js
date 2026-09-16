@@ -38,7 +38,13 @@ const shiftStamp = s => {
   return d.toISOString();
 };
 const read = (sub, f) => JSON.parse(fs.readFileSync(path.join(DATA, sub, f), "utf8"));
-const files = sub => fs.readdirSync(path.join(DATA, sub)).filter(f => f.endsWith(".json")).sort();
+// git doesn't track empty directories, so an all-empty fixture folder (e.g. no
+// sample dailyUpdates) may not exist at all in a fresh checkout — that's fine,
+// it just means there's nothing to load, not an error.
+const files = sub => {
+  try { return fs.readdirSync(path.join(DATA, sub)).filter(f => f.endsWith(".json")).sort(); }
+  catch (e) { if (e.code === "ENOENT") return []; throw e; }
+};
 
 if (RESET) {
   console.log("Wiping every table…");
