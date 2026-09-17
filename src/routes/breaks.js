@@ -3,7 +3,7 @@
  *  behalf. Viewing is scoped: employees see their own, managers see anyone's. */
 import { randomUUID } from "node:crypto";
 import * as store from "../db.js";
-import { isManager } from "../domain.js";
+import { isManager, breakType } from "../domain.js";
 import { broadcast } from "../events.js";
 
 export function mountBreaks(app, requireUser) {
@@ -17,10 +17,15 @@ export function mountBreaks(app, requireUser) {
   });
 
   app.post("/api/breaks/start", requireUser, (req, res) => {
+    const type = breakType(req.body?.kind);
+    if (!type) return res.status(422).json({ error: "Choose a valid break type." });
     if (store.getOpenBreak(req.user.id)) {
       return res.status(409).json({ error: "You're already on a break." });
     }
-    const b = store.startBreak(randomUUID(), req.user.id);
+    if (store.usedBreakKindToday(req.user.id, type.id)) {
+      return res.status(409).json({ error: `You've already used ${type.label} today.` });
+    }
+    const b = store.startBreak(randomUUID(), req.user.id, type.id);
     broadcast(["breaks"], req.user.id);
     res.status(201).json({ break: b });
   });

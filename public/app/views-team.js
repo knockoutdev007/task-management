@@ -30,7 +30,8 @@ function viewTeam() {
   const TF = S.teamFilters;
   const loads = people.map(e => ({
     e, w: workload(e.id), cur: currentTasks(e.id, 1)[0],
-    ob: openBreakFor(e.id), brk: totalBreakSeconds(e.id, todayISO())
+    ob: openBreakFor(e.id), brk: totalBreakSeconds(e.id, todayISO()),
+    brkExtra: sum(breaksToday(e.id), b => b.extraSec)
   }));
   const shown = sortTeamRows(loads.filter(({ cur }) =>
     (!TF.priority || (cur && cur.priority === TF.priority)) &&
@@ -47,7 +48,7 @@ function viewTeam() {
       <div class="panel-h"><h2>${esc(deptName(dept))}</h2><span class="hint">${rows.length} people</span></div>
       <div class="tw"><table class="t">
         <thead><tr>${TEAM_COLS.map(([k, l, cls]) => `<th class="${cls ? cls + " " : ""}sortable" data-teamsort="${k}">${esc(l)}${S.teamSort.key === k ? `<span class="caret"> ${S.teamSort.dir > 0 ? "▲" : "▼"}</span>` : ""}</th>`).join("")}<th></th></tr></thead>
-        <tbody>${rows.map(({ e, w, cur, ob, brk }) => `<tr>
+        <tbody>${rows.map(({ e, w, cur, ob, brk, brkExtra }) => `<tr>
           <td><span class="cellname">${av(e, "sm")}<span class="tx"><button class="linkish" data-emp="${esc(e.id)}">${esc(e.name)}</button><div style="font-size:10.5px;color:var(--ink-4)">${esc(e.title || "")}</div></span></span></td>
           <td style="font-size:11.5px">${esc(teamName(e.departmentId, e.teamId))}</td>
           <td class="c">${cur ? pPill(cur.priority) : "<span style='color:var(--ink-4)'>·</span>"}</td>
@@ -58,7 +59,7 @@ function viewTeam() {
           <td class="c mono" style="${w.overdue ? "color:var(--crit);font-weight:600" : "color:var(--ink-4)"}">${w.overdue || "·"}</td>
           <td class="c mono" style="${w.blocked ? "color:var(--block);font-weight:600" : "color:var(--ink-4)"}">${w.blocked || "·"}</td>
           <td class="c mono" style="${w.completedWeek ? "color:var(--ok)" : "color:var(--ink-4)"}">${w.completedWeek || "·"}</td>
-          <td class="c mono" style="${ob ? "color:var(--warn);font-weight:600" : "color:var(--ink-4)"}">${ob ? "● " : ""}${fmtDuration(brk)}</td>
+          <td class="c mono" style="${brkExtra > 0 ? "color:var(--crit);font-weight:600" : ob ? "color:var(--warn);font-weight:600" : "color:var(--ink-4)"}">${ob ? "● " : ""}${fmtDuration(brk)}${brkExtra > 0 ? ` +${fmtDuration(brkExtra)}` : ""}</td>
           <td class="r"><button class="btn sm" data-emp="${esc(e.id)}">Open</button></td>
         </tr>`).join("")}</tbody>
       </table></div>
@@ -104,15 +105,15 @@ function viewEmployee(id) {
       ${canAdmin() ? `<button class="btn" data-editemp="${esc(e.id)}">${icon("edit")}Edit</button>` : ""}</div>
   </div>
   ${kpiStrip([
-    { label: "Active", value: w.active, tone: "acc", detail: `${w.remainingHours}h remaining` },
-    { label: "Critical", value: w.critical, tone: "crit", detail: "open" },
-    { label: "High", value: w.high, tone: "warn", detail: "open" },
-    { label: "Due today", value: w.dueToday, tone: "med", detail: "" },
-    { label: "Overdue", value: w.overdue, tone: "crit", detail: "" },
-    { label: "Blocked", value: w.blocked, tone: "block", detail: "" },
-    { label: "Done this week", value: w.completedWeek, tone: "ok", detail: `${d.completed} in 4 weeks` },
-    { label: "Workload", value: `<span style="font-size:15px">${w.band === "OVERLOADED" ? "Over" : w.band[0] + w.band.slice(1).toLowerCase()}</span>`, tone: w.band === "OVERLOADED" ? "crit" : w.band === "HIGH" ? "warn" : "ok", detail: `score ${w.score}` },
-    { label: "Break time", value: fmtDuration(totalBreakSeconds(id, todayISO())), tone: "warn", detail: "today" }
+    { label: "Active", value: w.active, tone: "acc" },
+    { label: "Critical", value: w.critical, tone: "crit" },
+    { label: "High", value: w.high, tone: "warn" },
+    { label: "Due today", value: w.dueToday, tone: "med" },
+    { label: "Overdue", value: w.overdue, tone: "crit" },
+    { label: "Blocked", value: w.blocked, tone: "block" },
+    { label: "Done this week", value: w.completedWeek, tone: "ok" },
+    { label: "Workload", value: `<span style="font-size:15px">${w.band === "OVERLOADED" ? "Over" : w.band[0] + w.band.slice(1).toLowerCase()}</span>`, tone: w.band === "OVERLOADED" ? "crit" : w.band === "HIGH" ? "warn" : "ok" },
+    { label: "Break time", value: fmtDuration(totalBreakSeconds(id, todayISO())), tone: "warn" }
   ])}
   <div class="cc-grid">
     <div class="stack">
@@ -135,10 +136,10 @@ function viewEmployee(id) {
         <div class="panel-b">${deliveryPanel(d)}</div></section>
       <section class="panel"><div class="panel-h"><h2>Break history</h2><span class="hint">most recent ${brks.length}</span></div>
         <div class="panel-b" style="display:grid;gap:7px">
-          ${brks.length ? brks.map(b => `
+          ${brks.length ? brks.map(brk => `
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px">
-              <span>${esc(fmtDate(b.startedAt, { absolute: true }))} · ${esc(fmtTime(b.startedAt))} – ${b.endedAt ? esc(fmtTime(b.endedAt)) : "now"}</span>
-              <span class="mono" style="${b.endedAt ? "color:var(--ink-3)" : "color:var(--warn);font-weight:600"}">${fmtDuration(b.liveDurationSec)}</span>
+              <span>${esc(brk.typeLabel || "Break")} · ${esc(fmtDate(brk.startedAt, { absolute: true }))} · ${esc(fmtTime(brk.startedAt))} – ${brk.endedAt ? esc(fmtTime(brk.endedAt)) : "now"}</span>
+              <span class="mono" style="${brk.extraSec > 0 ? "color:var(--crit);font-weight:600" : brk.endedAt ? "color:var(--ink-3)" : "color:var(--warn);font-weight:600"}">${fmtDuration(brk.liveDurationSec)}${brk.extraSec > 0 ? ` (+${fmtDuration(brk.extraSec)} over)` : ""}</span>
             </div>`).join("") : emptyState("No breaks recorded", "Nothing logged yet.")}
         </div></section>
       <section class="panel"><div class="panel-h"><h2>Recent daily updates</h2></div>
@@ -192,14 +193,14 @@ function viewProject(pid) {
   <div class="ph"><div><h1>${esc(p.name)}</h1><div class="sub">${esc(p.description || "")} Owner ${esc(empName(p.ownerId))} · ${esc(fmtDate(p.startDate, { absolute: true }))} → ${esc(fmtDate(p.targetDate, { absolute: true }))}</div></div>
     <div class="sp"><button class="btn" data-proj="">← Projects</button><button class="btn" data-projtasks="${esc(p.id)}">See tasks</button></div></div>
   ${kpiStrip([
-    { label: "Overall progress", value: s.progress + "%", tone: "acc", detail: "weighted by priority" },
-    { label: "Total tasks", value: s.total, tone: "acc", detail: "" },
-    { label: "Completed", value: s.completed, tone: "ok", detail: "" },
-    { label: "In progress", value: s.inProgress, tone: "med", detail: "" },
-    { label: "Not started", value: s.notStarted, tone: "acc", detail: "" },
-    { label: "Blocked", value: s.blocked, tone: "block", detail: "" },
-    { label: "Overdue", value: s.overdue, tone: "crit", detail: "" },
-    { label: "Effort", value: s.hoursAct + "h", tone: "acc", detail: `of ${s.hoursEst}h estimated` }
+    { label: "Overall progress", value: s.progress + "%", tone: "acc" },
+    { label: "Total tasks", value: s.total, tone: "acc" },
+    { label: "Completed", value: s.completed, tone: "ok" },
+    { label: "In progress", value: s.inProgress, tone: "med" },
+    { label: "Not started", value: s.notStarted, tone: "acc" },
+    { label: "Blocked", value: s.blocked, tone: "block" },
+    { label: "Overdue", value: s.overdue, tone: "crit" },
+    { label: "Effort", value: s.hoursAct + "h", tone: "acc" }
   ])}
   <div class="cols-2">
     <section class="panel"><div class="panel-h"><h2>By person</h2></div>

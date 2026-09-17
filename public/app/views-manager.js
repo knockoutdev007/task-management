@@ -39,14 +39,14 @@ function viewControlCenter() {
   </div>
 
   ${kpiStrip([
-    { label: "Active tasks",   value: k.active,         tone: "acc",   filter: "flag:active",       detail: `${k.inProgress} in progress` },
-    { label: "Due today",      value: k.dueToday,       tone: k.dueToday ? "med" : "acc", filter: "due:today", detail: "across the team" },
-    { label: "Overdue",        value: k.overdue,        tone: "crit",  filter: "flag:overdue",      detail: k.overdue ? "past due date" : "all clear" },
-    { label: "Blocked",        value: k.blocked,        tone: "block", filter: "flag:blocked",      detail: `${ts.filter(t => isActive(t) && flags(t).needsManager).length} need you` },
-    { label: "Critical",       value: k.critical,       tone: "crit",  filter: "flag:critical",     detail: "open critical work" },
-    { label: "Needs an update", value: k.stale,          tone: "warn",  filter: "flag:stale",        detail: "past staleness threshold" },
-    { label: "Completed today", value: k.completedToday, tone: "ok",   filter: "completed:today",   detail: `${k.completedWeek} this week` },
-    { label: "Due this week",  value: k.dueWeek,        tone: "med",   filter: "due:week",          detail: "next 7 days" }
+    { label: "Active tasks",   value: k.active,         tone: "acc",   filter: "flag:active" },
+    { label: "Due today",      value: k.dueToday,       tone: k.dueToday ? "med" : "acc", filter: "due:today" },
+    { label: "Overdue",        value: k.overdue,        tone: "crit",  filter: "flag:overdue" },
+    { label: "Blocked",        value: k.blocked,        tone: "block", filter: "flag:blocked" },
+    { label: "Critical",       value: k.critical,       tone: "crit",  filter: "flag:critical" },
+    { label: "Needs an update", value: k.stale,          tone: "warn",  filter: "flag:stale" },
+    { label: "Completed today", value: k.completedToday, tone: "ok",   filter: "completed:today" },
+    { label: "Due this week",  value: k.dueWeek,        tone: "med",   filter: "due:week" }
   ])}
 
   ${priorityStatusFilterBar("ov", OF, "clearovfilters", `<span class="hint">Narrows Team workload, Requires attention, Upcoming deadlines, Recently completed and Currently working on below.</span>`)}
@@ -142,7 +142,8 @@ function workCard(e, n, filter) {
   const w = workload(e.id);
   const upd = latestUpdate(e.id);
   const ob = openBreakFor(e.id);
-  const breakBadge = ob ? `<span class="flag st">${icon("clock")}On break · ${fmtDuration(Math.round((Date.now() - dOf(ob.startedAt).getTime()) / 1000))}</span>` : "";
+  const obX = ob && withBreakExtra(ob);
+  const breakBadge = obX ? `<span class="flag st" style="${obX.extraSec > 0 ? "color:var(--crit)" : ""}">${icon("clock")}${esc(obX.typeLabel || "On break")} · ${fmtDuration(obX.liveDurationSec)}${obX.extraSec > 0 ? ` (+${fmtDuration(obX.extraSec)} over)` : ""}</span>` : "";
   if (!cur.length) {
     const noMatch = filter && allCur.length;
     return `<article class="wcard idle">

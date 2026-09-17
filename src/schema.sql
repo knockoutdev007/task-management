@@ -131,6 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_updates_date ON daily_updates(date);
 CREATE TABLE IF NOT EXISTS breaks (
   id           TEXT PRIMARY KEY,
   employee_id  TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  kind         TEXT,                            -- SHORT1 / SHORT2 / LONG — see BREAK_TYPES; null on rows from before this column existed
   started_at   TEXT NOT NULL,
   ended_at     TEXT,                            -- null while break is in progress
   duration_sec INTEGER,                         -- filled in on end

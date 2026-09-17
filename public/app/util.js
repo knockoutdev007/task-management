@@ -183,6 +183,15 @@ const DEFAULT_CONFIG = {
 };
 const PROGRESS_STEPS = [0, 10, 25, 50, 75, 90, 100];
 
+/** Fixed break types, mirrored on the server (src/domain.js) — deliberately
+ *  not config-driven, and not fetched from the API since they never change. */
+const BREAK_TYPES = [
+  { id: "SHORT1", label: "Short Break 1", allottedSec: 15 * 60 },
+  { id: "SHORT2", label: "Short Break 2", allottedSec: 15 * 60 },
+  { id: "LONG", label: "Long Break", allottedSec: 30 * 60 }
+];
+const breakType = id => BREAK_TYPES.find(t => t.id === id) || null;
+
 /** [key, label] pairs shared by the global default toggles (Settings) and
  *  each person's own override toggles (Account) — one list, not two. */
 const NOTIFY_LABELS = [

@@ -12,6 +12,16 @@ export const isManager = user => !!user && user.role === "manager";
 const statusKind = (cfg, id) => (cfg.statuses.find(s => s.id === id) || { kind: "open" }).kind;
 export const isClosedStatus = (cfg, id) => statusKind(cfg, id) === "done";
 
+/* --------------------------------------------------------------- breaks */
+
+/** Fixed break types — deliberately not config-driven, unlike priorities/statuses. */
+export const BREAK_TYPES = [
+  { id: "SHORT1", label: "Short Break 1", allottedSec: 15 * 60 },
+  { id: "SHORT2", label: "Short Break 2", allottedSec: 15 * 60 },
+  { id: "LONG", label: "Long Break", allottedSec: 30 * 60 }
+];
+export const breakType = id => BREAK_TYPES.find(t => t.id === id) || null;
+
 /* ------------------------------------------------------------ permissions */
 
 /** Who may change a task at all. Employees own their own work. */

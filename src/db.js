@@ -20,6 +20,14 @@ db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 db.exec(fs.readFileSync(path.join(HERE, "schema.sql"), "utf8"));
 
+// Older databases predate the breaks.kind column; CREATE TABLE IF NOT EXISTS
+// above is a no-op against an existing table, so add it here if missing.
+// A plain nullable column needs no table-recreate dance (unlike the
+// email -> username migration, which had to add a UNIQUE constraint).
+if (!db.prepare("PRAGMA table_info(breaks)").all().some(c => c.name === "kind")) {
+  db.exec("ALTER TABLE breaks ADD COLUMN kind TEXT");
+}
+
 export const now = () => new Date().toISOString();
 const J = (v, fallback) => { try { return v == null ? fallback : JSON.parse(v); } catch { return fallback; } };
 
@@ -419,7 +427,7 @@ export function upsertUpdate(employeeId, e) {
 /* -------------------------------------------------------------------- breaks */
 
 const breakOut = r => r && ({
-  id: r.id, employeeId: r.employee_id, startedAt: r.started_at, endedAt: r.ended_at,
+  id: r.id, employeeId: r.employee_id, kind: r.kind, startedAt: r.started_at, endedAt: r.ended_at,
   durationSec: r.duration_sec, createdAt: r.created_at, updatedAt: r.updated_at
 });
 
@@ -435,10 +443,15 @@ export const listAllBreaks = () =>
 export const getOpenBreak = employeeId =>
   breakOut(db.prepare("SELECT * FROM breaks WHERE employee_id = ? AND ended_at IS NULL").get(employeeId));
 
-export function startBreak(id, employeeId) {
+/** Has this person already started this break kind today (any status)? Backs the once-per-type-per-day rule. */
+export const usedBreakKindToday = (employeeId, kind) =>
+  !!db.prepare("SELECT 1 FROM breaks WHERE employee_id = ? AND kind = ? AND date(started_at) = date('now') LIMIT 1")
+    .get(employeeId, kind);
+
+export function startBreak(id, employeeId, kind) {
   const t = now();
-  db.prepare(`INSERT INTO breaks (id, employee_id, started_at, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?)`).run(id, employeeId, t, t, t);
+  db.prepare(`INSERT INTO breaks (id, employee_id, kind, started_at, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?)`).run(id, employeeId, kind, t, t, t);
   return getOpenBreak(employeeId);
 }
 

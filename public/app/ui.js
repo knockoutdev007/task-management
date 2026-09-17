@@ -41,7 +41,6 @@ function kpiStrip(items) {
     <button class="kpi t-${k.tone || "acc"}" data-kpi="${esc(k.filter || "")}" title="${esc(k.title || "Open filtered task list")}">
       <div class="k-l">${esc(k.label)}</div>
       <div class="k-v">${k.value}</div>
-      <div class="k-d">${esc(k.detail || "")}</div>
     </button>`).join("") + `</div>`;
 }
 function emptyState(title, msg) { return `<div class="empty"><strong>${esc(title)}</strong>${esc(msg || "")}</div>`; }
@@ -188,10 +187,13 @@ function paint() {
   $("#notifAria").textContent = n.length ? `${n.length} unread notification${n.length === 1 ? "" : "s"}` : "";
   $("#newTaskBtn").hidden = !S.me;
   const onBreak = S.me && openBreakFor(meId());
+  const onBreakX = onBreak && withBreakExtra(onBreak);
   $("#breakBtn").hidden = !S.me;
   $("#breakBtn").classList.toggle("on", !!onBreak);
-  $("#breakBtnLabel").textContent = onBreak
-    ? "End break · " + fmtDuration(Math.round((Date.now() - dOf(onBreak.startedAt).getTime()) / 1000))
+  $("#breakBtn").classList.toggle("over", !!(onBreakX && onBreakX.extraSec > 0));
+  $("#breakBtnLabel").textContent = onBreakX
+    ? `End ${onBreakX.typeLabel || "break"} · ${fmtDuration(onBreakX.liveDurationSec)}` +
+      (onBreakX.extraSec > 0 ? ` (+${fmtDuration(onBreakX.extraSec)} over)` : "")
     : "Start break";
 
   const v = $("#view");

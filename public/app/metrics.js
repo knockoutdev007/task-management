@@ -161,20 +161,34 @@ function totalBreakSeconds(empId, sinceISO, untilISO) {
                && (!sinceISO || b.startedAt >= sinceISO) && (!untilISO || b.startedAt < untilISO)),
              b => b.durationSec || 0);
 }
-/** Every break that started today for one person, oldest first — an open one's
- *  duration is computed live from its start time rather than stored. */
+/** Adds the live/derived fields every break display needs: elapsed seconds
+ *  (stored if ended, computed live if still open), and how far over its
+ *  type's allotment that runs — 0 for legacy rows with no kind, or types
+ *  within their allotment. "Extra time" is always derived, never stored,
+ *  so it stays correct even for a break someone forgot to end. */
+function withBreakExtra(b) {
+  const liveDurationSec = b.durationSec ?? Math.round((Date.now() - dOf(b.startedAt).getTime()) / 1000);
+  const type = breakType(b.kind);
+  const extraSec = type ? Math.max(0, liveDurationSec - type.allottedSec) : 0;
+  return { ...b, liveDurationSec, extraSec, typeLabel: type ? type.label : null, allottedSec: type ? type.allottedSec : null };
+}
+/** Every break that started today for one person, oldest first. */
 function breaksToday(empId) {
   const start = todayISO();
   return S.breaks.filter(b => b.employeeId === empId && b.startedAt.slice(0, 10) === start)
-    .sort(by(b => b.startedAt))
-    .map(b => ({ ...b, liveDurationSec: b.durationSec ?? Math.round((Date.now() - dOf(b.startedAt).getTime()) / 1000) }));
+    .sort(by(b => b.startedAt)).map(withBreakExtra);
 }
 /** A person's most recent breaks (any day), newest first — for the manager's
  *  timestamped view of exactly when someone was away and for how long. */
 function recentBreaks(empId, n = 20) {
   return S.breaks.filter(b => b.employeeId === empId)
-    .sort(by(b => b.startedAt, -1)).slice(0, n)
-    .map(b => ({ ...b, liveDurationSec: b.durationSec ?? Math.round((Date.now() - dOf(b.startedAt).getTime()) / 1000) }));
+    .sort(by(b => b.startedAt, -1)).slice(0, n).map(withBreakExtra);
+}
+/** Which of today's break types this person has already used — backs the
+ *  once-per-type-per-day picker (disable what's already taken). */
+function usedBreakKindsToday(empId) {
+  const start = todayISO();
+  return new Set(S.breaks.filter(b => b.employeeId === empId && b.startedAt.slice(0, 10) === start).map(b => b.kind));
 }
 
 /* ------------------------------------------------------------- team totals */

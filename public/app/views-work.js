@@ -33,14 +33,14 @@ function viewMyDay() {
   ${!didToday && open.length ? `<div class="banner info">${icon("clock")}<span>You haven't posted an update today. It takes about 30 seconds and saves your manager from asking.</span><button class="btn sm" data-go="update" style="margin-left:auto">Do it now</button></div>` : ""}
 
   ${kpiStrip([
-    { label: "Due today", value: today.length, tone: today.length ? "med" : "acc", filter: "due:today", detail: "on your plate" },
-    { label: "In progress", value: inprog.length, tone: "acc", filter: "status:IN_PROGRESS", detail: "started" },
-    { label: "Overdue", value: overdue.length, tone: "crit", filter: "flag:overdue", detail: overdue.length ? "needs a new date or a push" : "none" },
-    { label: "Blocked", value: blocked.length, tone: "block", filter: "flag:blocked", detail: blocked.length ? "waiting on someone" : "none" },
-    { label: "Critical", value: crit.length, tone: "crit", filter: "flag:critical", detail: "highest priority" },
-    { label: "Next 7 days", value: today.length + tomorrow.length + wk.length, tone: "med", filter: "due:week", detail: "upcoming" },
-    { label: "Done this week", value: w.completedWeek, tone: "ok", filter: "completed:week", detail: `${w.completedToday} today` },
-    { label: "On-time rate", value: d.stats.onTimeRate == null ? "—" : d.stats.onTimeRate + "%", tone: "ok", filter: "completed:month", detail: "last 4 weeks" }
+    { label: "Due today", value: today.length, tone: today.length ? "med" : "acc", filter: "due:today" },
+    { label: "In progress", value: inprog.length, tone: "acc", filter: "status:IN_PROGRESS" },
+    { label: "Overdue", value: overdue.length, tone: "crit", filter: "flag:overdue" },
+    { label: "Blocked", value: blocked.length, tone: "block", filter: "flag:blocked" },
+    { label: "Critical", value: crit.length, tone: "crit", filter: "flag:critical" },
+    { label: "Next 7 days", value: today.length + tomorrow.length + wk.length, tone: "med", filter: "due:week" },
+    { label: "Done this week", value: w.completedWeek, tone: "ok", filter: "completed:week" },
+    { label: "On-time rate", value: d.stats.onTimeRate == null ? "—" : d.stats.onTimeRate + "%", tone: "ok", filter: "completed:month" }
   ])}
 
   <div class="cc-grid">
@@ -84,8 +84,8 @@ function viewMyDay() {
         <div class="panel-b" style="display:grid;gap:7px">
           ${myBreaksToday.length ? myBreaksToday.map(b => `
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:12.5px">
-              <span>${esc(fmtTime(b.startedAt))} – ${b.endedAt ? esc(fmtTime(b.endedAt)) : "now"}</span>
-              <span class="mono" style="${b.endedAt ? "color:var(--ink-3)" : "color:var(--warn);font-weight:600"}">${fmtDuration(b.liveDurationSec)}</span>
+              <span>${esc(b.typeLabel || "Break")} · ${esc(fmtTime(b.startedAt))} – ${b.endedAt ? esc(fmtTime(b.endedAt)) : "now"}</span>
+              <span class="mono" style="${b.extraSec > 0 ? "color:var(--crit);font-weight:600" : b.endedAt ? "color:var(--ink-3)" : "color:var(--warn);font-weight:600"}">${fmtDuration(b.liveDurationSec)}${b.extraSec > 0 ? ` (+${fmtDuration(b.extraSec)} over)` : ""}</span>
             </div>`).join("") : `<div style="font-size:12px;color:var(--ink-4)">No breaks taken today.</div>`}
         </div>
       </section>

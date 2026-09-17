@@ -170,6 +170,19 @@ function pickerModal(title, tasks, action) {
       </button>`).join("") : emptyState("Nothing to pick", "You have no open tasks.")}</div>
   </div>`;
 }
+function breakTypeModal() {
+  const used = usedBreakKindsToday(meId());
+  return `<div class="modal" role="dialog" aria-modal="true" aria-label="Start a break">
+    <div class="dh"><h2>Start a break</h2><div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>
+    <div class="db" style="padding:12px;gap:8px">${BREAK_TYPES.map(t => { const taken = used.has(t.id); return `
+      <button class="break-opt" data-startbreak="${esc(t.id)}" ${taken ? "disabled" : ""}>
+        <span class="break-opt-ic">${icon(taken ? "check" : "clock")}</span>
+        <span style="flex:1;text-align:left;min-width:0">
+          <span class="t" style="display:block">${esc(t.label)}</span>
+          <span class="m">${taken ? "Already used today" : `${Math.round(t.allottedSec / 60)} min allotted`}</span></span>
+      </button>`; }).join("")}</div>
+  </div>`;
+}
 function notifModal() {
   const ns = notifications();
   S.notifSeen = Date.now(); store.set("notifSeen", S.notifSeen);

@@ -8,3 +8,5 @@ backups/
 .DS_Store
 *:Zone.Identifier
 *.log
+AGENTS.md
+CLAUDE.md

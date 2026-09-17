@@ -239,18 +239,23 @@ async function resetPassword(id) {
   closeLayer();
   showTempPassword(person, r.data.temporaryPassword);
 }
-async function toggleBreak() {
-  const open = openBreakFor(meId());
-  if (open) {
-    const r = await POST("/api/breaks/end");
-    if (!r.ok) { toast(explain(r), true); return; }
-    const i = S.breaks.findIndex(b => b.id === r.data.break.id);
-    if (i >= 0) S.breaks[i] = r.data.break; else S.breaks.push(r.data.break);
-  } else {
-    const r = await POST("/api/breaks/start");
-    if (!r.ok) { toast(explain(r), true); return; }
-    S.breaks.push(r.data.break);
-  }
+function applyBreak(b) {
+  const i = S.breaks.findIndex(x => x.id === b.id);
+  if (i >= 0) S.breaks[i] = b; else S.breaks.push(b);
+}
+/** Ends the caller's own open break, if any — the "End break" state of the header button. */
+async function endBreakNow() {
+  const r = await POST("/api/breaks/end");
+  if (!r.ok) { toast(explain(r), true); return; }
+  applyBreak(r.data.break);
+  render();
+}
+/** Starts a break of the chosen type — called after picking one in breakTypeModal(). */
+async function startBreakAs(kind) {
+  const r = await POST("/api/breaks/start", { kind });
+  if (!r.ok) { toast(explain(r), true); return; }
+  applyBreak(r.data.break);
+  closeLayer();
   render();
 }
 async function saveProject(p) {
