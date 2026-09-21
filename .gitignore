@@ -5,6 +5,7 @@ data/
 *.db-wal
 .env
 backups/
+tcc-real-data.sql
 .DS_Store
 *:Zone.Identifier
 *.log
