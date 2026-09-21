@@ -1,176 +1,204 @@
--- Team Control Center — SQLite schema
--- Every table carries created_at / updated_at as ISO-8601 UTC strings.
-
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
+-- Team Control Center — MySQL schema (ported from SQLite; see AGENTS.md)
+--
+-- Every table carries created_at / updated_at (and every other timestamp) as
+-- ISO-8601 UTC strings in a plain VARCHAR, not a native DATETIME — the app
+-- treats timestamps as opaque, lexicographically-sortable strings throughout
+-- (see now() in db.js), so this preserves exact behavior across the port
+-- instead of introducing MySQL's own DATETIME/timezone semantics.
+--
+-- Every foreign key uses an explicit FOREIGN KEY (...) REFERENCES ... clause
+-- rather than an inline "col REFERENCES table(col)" — MySQL/InnoDB parses the
+-- inline form but silently does NOT enforce or cascade it.
+--
+-- CHECK constraints require MySQL 8.0.16+; on an older server they're parsed
+-- but not enforced, which is safe here since db.js/domain.js validate the
+-- same rules in the application layer regardless.
 
 CREATE TABLE IF NOT EXISTS employees (
-  id                   TEXT PRIMARY KEY,
-  name                 TEXT NOT NULL,
-  initials             TEXT NOT NULL DEFAULT '',
-  username             TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  password_hash        TEXT,                       -- null until the first password is set
-  must_change_password INTEGER NOT NULL DEFAULT 0,
-  role                 TEXT NOT NULL DEFAULT 'employee' CHECK (role IN ('manager','employee')),
-  title                TEXT NOT NULL DEFAULT '',
-  department_id        TEXT NOT NULL DEFAULT '',
-  team_id              TEXT NOT NULL DEFAULT '',
-  manager_id           TEXT REFERENCES employees(id) ON DELETE SET NULL,
-  capacity_hours       INTEGER NOT NULL DEFAULT 40,
-  color                TEXT NOT NULL DEFAULT '#0E7C86',
-  active               INTEGER NOT NULL DEFAULT 1,
-  last_login_at        TEXT,
-  created_at           TEXT NOT NULL,
-  updated_at           TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_employees_active ON employees(active);
-CREATE INDEX IF NOT EXISTS idx_employees_team   ON employees(department_id, team_id);
+  id                   VARCHAR(64) PRIMARY KEY,
+  name                 VARCHAR(255) NOT NULL,
+  initials             VARCHAR(8) NOT NULL DEFAULT '',
+  username             VARCHAR(190) NOT NULL UNIQUE COLLATE utf8mb4_general_ci,  -- case-insensitive; every other column here is case-sensitive
+  password_hash        VARCHAR(255),                       -- null until the first password is set
+  must_change_password TINYINT(1) NOT NULL DEFAULT 0,
+  role                 VARCHAR(16) NOT NULL DEFAULT 'employee' CHECK (role IN ('manager','employee')),
+  title                VARCHAR(255) NOT NULL DEFAULT '',
+  department_id        VARCHAR(64) NOT NULL DEFAULT '',
+  team_id              VARCHAR(64) NOT NULL DEFAULT '',
+  manager_id           VARCHAR(64),
+  capacity_hours       INT NOT NULL DEFAULT 40,
+  color                VARCHAR(16) NOT NULL DEFAULT '#0E7C86',
+  active               TINYINT(1) NOT NULL DEFAULT 1,
+  last_login_at        VARCHAR(32),
+  created_at           VARCHAR(32) NOT NULL,
+  updated_at           VARCHAR(32) NOT NULL,
+  INDEX idx_employees_active (active),
+  INDEX idx_employees_team (department_id, team_id),
+  FOREIGN KEY (manager_id) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS projects (
-  id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL,
-  code        TEXT NOT NULL DEFAULT '',
-  owner_id    TEXT REFERENCES employees(id) ON DELETE SET NULL,
-  description TEXT NOT NULL DEFAULT '',
-  start_date  TEXT,
-  target_date TEXT,
-  status      TEXT NOT NULL DEFAULT 'ACTIVE',
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
-);
+  id          VARCHAR(64) PRIMARY KEY,
+  name        VARCHAR(255) NOT NULL,
+  code        VARCHAR(64) NOT NULL DEFAULT '',
+  owner_id    VARCHAR(64),
+  description TEXT,
+  start_date  VARCHAR(32),
+  target_date VARCHAR(32),
+  status      VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  created_at  VARCHAR(32) NOT NULL,
+  updated_at  VARCHAR(32) NOT NULL,
+  FOREIGN KEY (owner_id) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS tasks (
-  id                  TEXT PRIMARY KEY,
-  title               TEXT NOT NULL,
-  description         TEXT NOT NULL DEFAULT '',
-  assignee_id         TEXT REFERENCES employees(id) ON DELETE SET NULL,
-  created_by_id       TEXT REFERENCES employees(id) ON DELETE SET NULL,
-  department_id       TEXT NOT NULL DEFAULT '',
-  team_id             TEXT NOT NULL DEFAULT '',
-  project_id          TEXT REFERENCES projects(id) ON DELETE SET NULL,
-  category            TEXT NOT NULL DEFAULT '',
-  priority            TEXT NOT NULL DEFAULT 'MEDIUM',
-  status              TEXT NOT NULL DEFAULT 'NOT_STARTED',
-  progress            INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
-  start_date          TEXT,
-  due_date            TEXT,
-  expected_completion TEXT,
-  completed_at        TEXT,
-  estimated_hours     REAL,
-  actual_hours        REAL,
-  reopen_count        INTEGER NOT NULL DEFAULT 0,
-  tags                TEXT NOT NULL DEFAULT '[]',   -- JSON array
-  blocker             TEXT,                          -- JSON object or null
-  dependencies        TEXT NOT NULL DEFAULT '[]',   -- JSON array
-  links               TEXT NOT NULL DEFAULT '[]',   -- JSON array
-  created_at          TEXT NOT NULL,
-  updated_at          TEXT NOT NULL
-);
--- The dashboard's hot paths: by person, by state, by deadline, by freshness.
-CREATE INDEX IF NOT EXISTS idx_tasks_assignee   ON tasks(assignee_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_status     ON tasks(status);
-CREATE INDEX IF NOT EXISTS idx_tasks_due        ON tasks(due_date);
-CREATE INDEX IF NOT EXISTS idx_tasks_updated    ON tasks(updated_at);
-CREATE INDEX IF NOT EXISTS idx_tasks_project    ON tasks(project_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_priority   ON tasks(priority);
-CREATE INDEX IF NOT EXISTS idx_tasks_completed  ON tasks(completed_at);
-CREATE INDEX IF NOT EXISTS idx_tasks_open_due   ON tasks(status, due_date);
+  id                  VARCHAR(64) PRIMARY KEY,
+  title               VARCHAR(300) NOT NULL,
+  description         TEXT,
+  assignee_id         VARCHAR(64),
+  created_by_id       VARCHAR(64),
+  department_id       VARCHAR(64) NOT NULL DEFAULT '',
+  team_id             VARCHAR(64) NOT NULL DEFAULT '',
+  project_id          VARCHAR(64),
+  category            VARCHAR(64) NOT NULL DEFAULT '',
+  priority            VARCHAR(32) NOT NULL DEFAULT 'MEDIUM',
+  status              VARCHAR(32) NOT NULL DEFAULT 'NOT_STARTED',
+  progress            INT NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+  start_date          VARCHAR(32),
+  due_date            VARCHAR(32),
+  expected_completion VARCHAR(32),
+  completed_at        VARCHAR(32),
+  estimated_hours     DOUBLE,
+  actual_hours        DOUBLE,
+  reopen_count        INT NOT NULL DEFAULT 0,
+  tags                TEXT NOT NULL,   -- JSON array
+  blocker             TEXT,            -- JSON object or null
+  dependencies        TEXT NOT NULL,   -- JSON array
+  links               TEXT NOT NULL,   -- JSON array
+  created_at          VARCHAR(32) NOT NULL,
+  updated_at          VARCHAR(32) NOT NULL,
+  -- The dashboard's hot paths: by person, by state, by deadline, by freshness.
+  INDEX idx_tasks_assignee  (assignee_id),
+  INDEX idx_tasks_status    (status),
+  INDEX idx_tasks_due       (due_date),
+  INDEX idx_tasks_updated   (updated_at),
+  INDEX idx_tasks_project   (project_id),
+  INDEX idx_tasks_priority  (priority),
+  INDEX idx_tasks_completed (completed_at),
+  INDEX idx_tasks_open_due  (status, due_date),
+  FOREIGN KEY (assignee_id) REFERENCES employees(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by_id) REFERENCES employees(id) ON DELETE SET NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS task_comments (
-  id           TEXT PRIMARY KEY,
-  task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  author_id    TEXT REFERENCES employees(id) ON DELETE SET NULL,
-  at           TEXT NOT NULL,
+  id           VARCHAR(128) PRIMARY KEY,
+  task_id      VARCHAR(64) NOT NULL,
+  author_id    VARCHAR(64),
+  at           VARCHAR(32) NOT NULL,
   body         TEXT NOT NULL,
-  manager_note INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_comments_task ON task_comments(task_id, at);
+  manager_note TINYINT(1) NOT NULL DEFAULT 0,
+  INDEX idx_comments_task (task_id, at),
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (author_id) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS task_attachments (
-  id             TEXT PRIMARY KEY,
-  task_id        TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  filename       TEXT NOT NULL,        -- name on disk, under data/uploads/
-  original_name  TEXT NOT NULL,
-  mime_type      TEXT NOT NULL DEFAULT '',
-  size           INTEGER NOT NULL DEFAULT 0,
-  uploaded_by_id TEXT REFERENCES employees(id) ON DELETE SET NULL,
-  uploaded_at    TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_attachments_task ON task_attachments(task_id, uploaded_at);
+  id             VARCHAR(64) PRIMARY KEY,
+  task_id        VARCHAR(64) NOT NULL,
+  filename       VARCHAR(255) NOT NULL,        -- name on disk, under DATA_DIR/uploads/
+  original_name  VARCHAR(255) NOT NULL,
+  mime_type      VARCHAR(128) NOT NULL DEFAULT '',
+  size           BIGINT NOT NULL DEFAULT 0,
+  uploaded_by_id VARCHAR(64),
+  uploaded_at    VARCHAR(32) NOT NULL,
+  INDEX idx_attachments_task (task_id, uploaded_at),
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (uploaded_by_id) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS task_activity (
-  id         TEXT PRIMARY KEY,
-  task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  at         TEXT NOT NULL,
-  by_id      TEXT REFERENCES employees(id) ON DELETE SET NULL,
-  by_name    TEXT NOT NULL DEFAULT '',
-  kind       TEXT NOT NULL,
-  field      TEXT,
+  id         VARCHAR(128) PRIMARY KEY,
+  task_id    VARCHAR(64) NOT NULL,
+  at         VARCHAR(32) NOT NULL,
+  by_id      VARCHAR(64),
+  by_name    VARCHAR(255) NOT NULL DEFAULT '',
+  kind       VARCHAR(32) NOT NULL,
+  field      VARCHAR(64),
   from_value TEXT,
   to_value   TEXT,
-  note       TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_activity_task ON task_activity(task_id, at);
-CREATE INDEX IF NOT EXISTS idx_activity_at   ON task_activity(at);
+  note       TEXT,
+  INDEX idx_activity_task (task_id, at),
+  INDEX idx_activity_at   (at),
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (by_id) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS daily_updates (
-  id          TEXT PRIMARY KEY,
-  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-  date        TEXT NOT NULL,                -- YYYY-MM-DD
-  at          TEXT NOT NULL,
-  completed   TEXT NOT NULL DEFAULT '',
-  current     TEXT NOT NULL DEFAULT '',
-  next        TEXT NOT NULL DEFAULT '',
-  blocked     TEXT NOT NULL DEFAULT '',
-  help        TEXT NOT NULL DEFAULT '',
-  note        TEXT NOT NULL DEFAULT '',
-  UNIQUE (employee_id, date)
-);
-CREATE INDEX IF NOT EXISTS idx_updates_date ON daily_updates(date);
+  id          VARCHAR(128) PRIMARY KEY,
+  employee_id VARCHAR(64) NOT NULL,
+  date        VARCHAR(10) NOT NULL,                -- YYYY-MM-DD
+  at          VARCHAR(32) NOT NULL,
+  completed   TEXT NOT NULL,
+  current     TEXT NOT NULL,
+  next        TEXT NOT NULL,
+  blocked     TEXT NOT NULL,
+  help        TEXT NOT NULL,
+  note        TEXT NOT NULL,
+  UNIQUE KEY uq_updates_employee_date (employee_id, date),
+  INDEX idx_updates_date (date),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS breaks (
-  id           TEXT PRIMARY KEY,
-  employee_id  TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-  kind         TEXT,                            -- SHORT1 / SHORT2 / LONG — see BREAK_TYPES; null on rows from before this column existed
-  started_at   TEXT NOT NULL,
-  ended_at     TEXT,                            -- null while break is in progress
-  duration_sec INTEGER,                         -- filled in on end
-  created_at   TEXT NOT NULL,
-  updated_at   TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_breaks_employee ON breaks(employee_id, started_at);
+  id           VARCHAR(64) PRIMARY KEY,
+  employee_id  VARCHAR(64) NOT NULL,
+  kind         VARCHAR(16),                        -- SHORT1 / SHORT2 / LONG — see BREAK_TYPES
+  started_at   VARCHAR(32) NOT NULL,
+  ended_at     VARCHAR(32),                         -- null while break is in progress
+  duration_sec INT,                                 -- filled in on end
+  created_at   VARCHAR(32) NOT NULL,
+  updated_at   VARCHAR(32) NOT NULL,
+  INDEX idx_breaks_employee (employee_id, started_at),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS notifications (
-  id          TEXT PRIMARY KEY,
-  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-  task_id     TEXT REFERENCES tasks(id) ON DELETE CASCADE,
-  activity_id TEXT REFERENCES task_activity(id) ON DELETE SET NULL,
-  kind        TEXT NOT NULL,
+  id          VARCHAR(64) PRIMARY KEY,
+  employee_id VARCHAR(64) NOT NULL,
+  task_id     VARCHAR(64),
+  activity_id VARCHAR(128),
+  kind        VARCHAR(32) NOT NULL,
   text        TEXT NOT NULL,
-  created_at  TEXT NOT NULL,
-  read_at     TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_notifications_employee ON notifications(employee_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_notifications_unread   ON notifications(employee_id, read_at);
+  created_at  VARCHAR(32) NOT NULL,
+  read_at     VARCHAR(32),
+  INDEX idx_notifications_employee (employee_id, created_at),
+  INDEX idx_notifications_unread   (employee_id, read_at),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (activity_id) REFERENCES task_activity(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS employee_notify_prefs (
-  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-  key         TEXT NOT NULL,
-  value       INTEGER NOT NULL,
-  updated_at  TEXT NOT NULL,
-  PRIMARY KEY (employee_id, key)
-);
+  employee_id VARCHAR(64) NOT NULL,
+  `key`       VARCHAR(64) NOT NULL,
+  value       TINYINT(1) NOT NULL,
+  updated_at  VARCHAR(32) NOT NULL,
+  PRIMARY KEY (employee_id, `key`),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS config (
-  key        TEXT PRIMARY KEY,
-  value      TEXT NOT NULL,                 -- JSON
-  updated_at TEXT NOT NULL
-);
+  `key`      VARCHAR(64) PRIMARY KEY,
+  value      LONGTEXT NOT NULL,                 -- JSON
+  updated_at VARCHAR(32) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS sessions (
-  id          TEXT PRIMARY KEY,
-  employee_id TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-  created_at  TEXT NOT NULL,
-  expires_at  TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
+  id          VARCHAR(64) PRIMARY KEY,
+  employee_id VARCHAR(64) NOT NULL,
+  created_at  VARCHAR(32) NOT NULL,
+  expires_at  VARCHAR(32) NOT NULL,
+  INDEX idx_sessions_expiry (expires_at),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

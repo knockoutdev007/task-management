@@ -5,35 +5,36 @@
  * caller-supplied id and only ever touches the caller's own row.
  */
 import * as store from "../db.js";
+import { wrap } from "../wrap.js";
 
 export function mountNotifications(app, requireUser) {
-  app.get("/api/notifications", requireUser, (req, res) => {
+  app.get("/api/notifications", requireUser, wrap(async (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 40, 200);
-    res.json({ notifications: store.listNotifications(req.user.id, limit) });
-  });
+    res.json({ notifications: await store.listNotifications(req.user.id, limit) });
+  }));
 
-  app.post("/api/notifications/:id/read", requireUser, (req, res) => {
-    const n = store.getNotification(req.params.id);
+  app.post("/api/notifications/:id/read", requireUser, wrap(async (req, res) => {
+    const n = await store.getNotification(req.params.id);
     if (!n || n.employeeId !== req.user.id) return res.status(404).json({ error: "No such notification." });
-    store.markNotificationRead(req.params.id, req.user.id, new Date().toISOString());
+    await store.markNotificationRead(req.params.id, req.user.id, new Date().toISOString());
     res.json({ ok: true });
-  });
+  }));
 
-  app.post("/api/notifications/read-all", requireUser, (req, res) => {
-    store.markAllNotificationsRead(req.user.id, new Date().toISOString());
+  app.post("/api/notifications/read-all", requireUser, wrap(async (req, res) => {
+    await store.markAllNotificationsRead(req.user.id, new Date().toISOString());
     res.json({ ok: true });
-  });
+  }));
 
   // A personal override on top of the global default (config.notify) —
   // any signed-in person may read/write their own, never anyone else's.
-  app.get("/api/me/notify-prefs", requireUser, (req, res) => {
-    res.json({ prefs: store.getEmployeeNotifyPrefs(req.user.id) });
-  });
+  app.get("/api/me/notify-prefs", requireUser, wrap(async (req, res) => {
+    res.json({ prefs: await store.getEmployeeNotifyPrefs(req.user.id) });
+  }));
 
-  app.put("/api/me/notify-prefs", requireUser, (req, res) => {
+  app.put("/api/me/notify-prefs", requireUser, wrap(async (req, res) => {
     const patch = {};
     for (const [k, v] of Object.entries(req.body || {})) patch[k] = !!v;
-    store.setEmployeeNotifyPrefs(req.user.id, patch);
-    res.json({ prefs: store.getEmployeeNotifyPrefs(req.user.id) });
-  });
+    await store.setEmployeeNotifyPrefs(req.user.id, patch);
+    res.json({ prefs: await store.getEmployeeNotifyPrefs(req.user.id) });
+  }));
 }

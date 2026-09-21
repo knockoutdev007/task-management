@@ -4,18 +4,21 @@ An internal task tracker and management dashboard. Every person maintains their
 own tasks; the manager gets a live view of who is working on what, what is
 overdue, what is blocked, and who is overloaded — without asking anyone.
 
-Built to be boring to run: one Node process, one SQLite file, three
-dependencies. No build step, no bundler, no external services. It will handle a
-team of a few hundred on the smallest server you can rent.
+Built to be boring to run: one Node process, one MySQL database, four
+dependencies. No build step, no bundler. It will handle a team of a few
+hundred on the smallest server you can rent.
 
 ---
 
 ## Quick start
 
 ```bash
+mysql -u root -e "CREATE DATABASE tcc CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
+                   CREATE USER 'tcc_app'@'localhost' IDENTIFIED BY 'change-me';
+                   GRANT ALL PRIVILEGES ON tcc.* TO 'tcc_app'@'localhost';"
 npm install
-cp .env.example .env          # then set SESSION_SECRET — see below
-npm run seed                  # demo team, 5 projects, 58 tasks
+cp .env.example .env          # then set SESSION_SECRET and DATABASE_URL — see below
+npm run seed                  # the real team roster, 6 projects, 34 sample tasks
 npm start                     # http://localhost:3000
 ```
 
@@ -25,17 +28,24 @@ Generate the secret:
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
-The seed prints the sign-in details. Every seeded account starts on the password
+The seed prints the sign-in details. Everyone starts on the password
 `controlcenter1` and is asked to change it after signing in. Sign in as
-`asha.raman@demo.example` for the manager view, anyone else for the employee
-side.
+`roshani.shinde` for the manager view, anyone else for the employee side.
+There's no email address anywhere in this app — everyone signs in with a
+**User ID** auto-generated from their name (`John Doe` → `john.doe`, deduped
+with a trailing number on collision).
 
 **Starting with real data instead:** skip `npm run seed` and create the first
-manager directly. Everyone else gets added from Settings → People inside the app.
+manager directly. Everyone else gets added from Settings → People inside the
+app.
 
 ```bash
-npm run create-manager -- "Manager Name" asha.raman@demo.example
+npm run create-manager -- "Manager Name"
 ```
+
+`scripts/load-marketing-team.js` is a second, standalone seeder that loads a
+different hardcoded roster the same way `seed.js` does — an alternative to
+editing `scripts/seed-data/`, not something most people need.
 
 ---
 
@@ -50,8 +60,11 @@ src/
   auth.js          password hashing, sessions, the auth middleware
   events.js        Server-Sent Events hub for live updates
   routes/
-    tasks.js       the single write path for tasks, plus bulk and comments
-    admin.js       people, projects, settings, daily updates, /api/bootstrap
+    tasks.js         the single write path for tasks, plus bulk and comments
+    admin.js         people, projects, settings, daily updates, /api/bootstrap
+    attachments.js   file uploads on tasks
+    breaks.js        break tracking (start/end, once-per-type-per-day)
+    notifications.js the persisted per-employee notification feed
 public/
   index.html       the shell; loads the app files in order
   styles.css       design tokens first, then components
@@ -65,10 +78,13 @@ public/
     modals.js      dialogs and CSV exports
     events.js      event delegation, drag and drop, boot
 scripts/
-  seed.js          demo data (dates shift so "today" always looks right)
+  seed.js                loads scripts/seed-data/*.json (dates shift so "today" always looks right)
+  load-marketing-team.js an alternative, standalone seeder with its own hardcoded roster
   create-manager.js
   backup.js
-  smoke-test.js    50 API checks, including every permission rule
+  smoke-test.js          business rules and every permission boundary
+  security-test.js       session/cookie hardening, IDOR, upload and input validation
+  notif-test.js          client-side notification logic, loaded into a vm sandbox
 ```
 
 The frontend files are plain scripts sharing one global scope, loaded in the
@@ -85,11 +101,12 @@ everything from the task rows on each render:
   per-priority threshold, days blocked, schedule variance, effort overrun.
 - **`attention(task)`** — the reasons a task needs the manager, each with a
   severity and a sentence explaining itself. Ten detectors.
-- **`workload(employeeId)`** — deliberately *not* a task count. Each open task
-  contributes `priority weight × remaining-effort factor × deadline urgency`.
-  Blocked work costs attention at roughly half capacity plus a fixed penalty,
-  because it occupies a person without consuming their hours. Bands are
-  configurable in Settings.
+- **`workload(employeeId, taskFilter?)`** — deliberately *not* a task count.
+  Each open task contributes `priority weight × remaining-effort factor ×
+  deadline urgency`. Blocked work costs attention at roughly half capacity
+  plus a fixed penalty, because it occupies a person without consuming their
+  hours. Bands are configurable in Settings. The optional filter lets a view
+  narrow which tasks count without touching the underlying formula.
 - **`delivery(employeeId)`** — five weighted indicators (on-time rate, weight of
   work delivered, estimate accuracy, update consistency, deadline hygiene) with
   a low-confidence flag under five tasks. Every screen that shows it also shows
@@ -136,14 +153,16 @@ lock yourself out.
 
 User ID and password, hashed with bcrypt (cost 12), server-side sessions in the
 `sessions` table, signed httpOnly `SameSite=Lax` cookie. Failed logins are
-throttled per User ID+IP. The User ID is auto-generated from a person's full
-name (lowercase, dot-separated, e.g. `John Doe` → `john.doe`, deduped with a
-trailing number on collision) — no email address is collected or stored.
+throttled per User ID+IP (8 attempts / 15 minutes). The User ID is
+auto-generated from a person's full name (lowercase, dot-separated, e.g.
+`John Doe` → `john.doe`, deduped with a trailing number on collision) — no
+email address is collected or stored anywhere in the app.
 
 Adding someone in Settings → People returns a temporary password **once**. Pass
 it to them; they are prompted to replace it on first sign-in. Lost it? Reset the
 password from the same dialog. Changing a password signs that person out
-everywhere else.
+everywhere else — including the session they're currently on, once the new
+cookie is issued.
 
 **Swapping in Google or Microsoft SSO later:** replace `POST /api/auth/login` in
 `src/auth.js` with your provider's callback and keep issuing the same session
@@ -151,27 +170,49 @@ cookie. Nothing downstream reads anything but `req.user`.
 
 ---
 
+## Break tracking
+
+Starting a break asks which one: **Short Break 1** and **Short Break 2** (15
+minutes each) or a **Long Break** (30 minutes) — each fixed type can be taken
+at most once per person per day (`src/domain.js`'s `BREAK_TYPES`, deliberately
+not config-driven). Ending one is a single click; there's no separate type
+picker for that.
+
+If someone runs over their allotment, or simply forgets to end the break
+— the excess is **always derived live** from elapsed time vs. the type's
+allotment, never stored, so it's correct the moment someone looks, not just
+when the break ends. It shows up wherever break time already appears: the
+header button, My Day, the Team table, an employee's break history, and the
+Overview "currently working on" cards. Nothing pages anyone about it — it's a
+passive signal, not an alert.
+
+---
+
 ## Deploying
 
-The app needs one thing from its host: a **persistent disk** for the SQLite
-file. Anything that gives you that will do.
+The app needs two things from its host: a reachable **MySQL database** (8.0+),
+and — separately — a **persistent disk** for uploaded task attachments
+(`DATA_DIR`, not covered by a MySQL backup). Anything that gives you both
+will do.
 
 ### Docker (simplest)
 
 ```bash
 echo "SESSION_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")" > .env
+echo "DATABASE_URL=mysql://tcc_app:change-me@<mysql-host>:3306/tcc" >> .env
 docker compose up -d --build
 docker compose exec app node scripts/seed.js          # or create-manager.js
 ```
 
-Data lives in the `tcc-data` volume. Back it up.
+Attachments live in the `tcc-data` volume; the database itself is wherever
+`DATABASE_URL` points, so back that up separately (see Backups below).
 
 ### A plain server with nginx
 
 ```bash
 git clone <your repo> /srv/tcc && cd /srv/tcc
 npm install --omit=dev
-cp .env.example .env && $EDITOR .env
+cp .env.example .env && $EDITOR .env   # set SESSION_SECRET and DATABASE_URL
 npm run seed
 sudo tee /etc/systemd/system/tcc.service > /dev/null <<'UNIT'
 [Unit]
@@ -212,17 +253,21 @@ signed in. If you must run HTTP on a private network, set `INSECURE_COOKIES=1`.
 
 ### Platform hosting
 
-Railway, Render, Fly.io and similar all work — set `SESSION_SECRET`, attach a
-volume, and point `DATABASE_PATH` at it. Do **not** use a platform with an
-ephemeral filesystem (Vercel, Netlify, Lambda) without moving to Postgres first;
-the SQLite file would vanish on every deploy.
+Railway, Render, Fly.io and similar all work — set `SESSION_SECRET` and
+`DATABASE_URL` (pointing at that platform's managed MySQL add-on, or one you
+run elsewhere), and attach a **persistent disk** for `DATA_DIR` if you want
+uploaded attachments to survive a redeploy (most free tiers don't offer one).
+A platform with a fully ephemeral filesystem (Vercel, Netlify, Lambda) is
+still fine for the app itself now that the database is MySQL, not a local
+file — attachments are the only thing left needing a disk.
 
 ### Environment
 
 | Variable | Default | Notes |
 |---|---|---|
 | `SESSION_SECRET` | — | **Required**, 24+ random characters. Changing it signs everyone out. |
-| `DATABASE_PATH` | `./data/tcc.db` | Must be on a persistent disk. |
+| `DATABASE_URL` | — | **Required.** `mysql://user:pass@host:port/database`. |
+| `DATA_DIR` | `./data` | Where uploaded attachments live (`DATA_DIR/uploads`). Must be on a persistent disk in production. |
 | `PORT` | `3000` | |
 | `NODE_ENV` | | `production` enables the Secure cookie flag and static caching. |
 | `SESSION_DAYS` | `14` | How long a sign-in lasts. |
@@ -233,16 +278,15 @@ the SQLite file would vanish on every deploy.
 
 ## Backups
 
-SQLite is a single file, but don't copy it while the server is running — use the
-online backup API:
-
 ```bash
-npm run backup                    # -> ./backups/tcc-YYYY-MM-DD-HHmm.db
+npm run backup                    # -> ./backups/tcc-YYYY-MM-DD-HHmm.sql.gz (mysqldump)
 0 2 * * * cd /srv/tcc && /usr/bin/npm run backup    # nightly, keeps 30
 ```
 
-Restore: stop the app, replace `data/tcc.db` (and delete any `-wal` / `-shm`
-alongside it), start again.
+Requires `mysqldump` on PATH; it dumps via `DATABASE_URL`, safe to run while
+the server is up (`--single-transaction`). Restore: `gunzip -c backups/tcc-....sql.gz | mysql -u ... -p ... tcc`.
+Uploaded attachments (`DATA_DIR/uploads`) aren't part of this dump — back that
+directory up separately (a plain file copy/rsync is fine, it's not a database).
 
 ---
 
@@ -253,15 +297,27 @@ npm start        # in one terminal, against a scratch database
 npm test         # in another
 ```
 
-`scripts/smoke-test.js` runs 50 checks against the live API — validation rules,
-the audit trail, and every permission boundary, asserted by calling the API
-directly rather than through the interface, since that is how someone would
-actually try to get around it. It writes data, so point it at a scratch
-database, never production.
+`npm test` chains three scripts, all hitting the live API directly rather than
+going through the interface — that's how someone would actually try to get
+around a rule:
+
+- **`scripts/smoke-test.js`** (50 checks) — validation rules, the audit trail,
+  and every permission boundary.
+- **`scripts/security-test.js`** (44 checks) — session/cookie hardening
+  (forged and garbage cookies fail closed), the login throttle, session
+  fixation after a password change, cross-user authorization boundaries
+  (IDOR) across breaks/notifications/attachments, upload validation (MIME
+  type, size limit), and input validation edges. Runnable on its own via
+  `npm run test:security`.
+- **`scripts/notif-test.js`** (18 checks) — client-side notification and
+  @mention logic, loaded into a `vm` sandbox against the real `public/app`
+  source rather than reimplemented.
+
+All three write data, so point them at a scratch database, never production.
 
 ---
 
-## Scale, and when to leave SQLite
+## Scale
 
 Comfortable as-is: a few hundred people, tens of thousands of tasks, hundreds of
 thousands of activity rows. `GET /api/bootstrap` sends the whole board in one
@@ -274,12 +330,12 @@ Two thresholds to watch:
    `GET /api/tasks` (add `?since=` and `?status=`) and have the client hold a
    window instead of everything. The metrics functions already take a task list,
    so they don't change.
-2. **More than one server process.** SQLite is fine for one; the moment you want
-   two, move to Postgres. `schema.sql` ports almost unchanged — `TEXT` dates and
-   JSON columns work as-is, or convert them to `timestamptz` and `jsonb`. Swap
-   `better-sqlite3` for `pg` in `db.js`; nothing outside that file touches SQL.
-   The SSE hub in `events.js` would then need Redis pub/sub or Postgres
-   `LISTEN/NOTIFY` so both processes broadcast to each other.
+2. **More than one server process.** The database itself (MySQL, behind a
+   connection pool in `db.js`) is already fine with multiple app processes
+   talking to it concurrently. What isn't multi-process-safe yet is the SSE
+   hub in `events.js` — it broadcasts live updates in-memory, so two app
+   processes wouldn't see each other's events. That would need Redis pub/sub
+   or MySQL's own notification mechanisms to fan out across processes.
 
 `node_modules` aside, the whole thing is about 6,000 lines. It is meant to be
 read.
@@ -293,7 +349,8 @@ read.
   is a cron job over `task_activity` — nothing else has to change.
 - **Statuses, priorities, departments, teams, categories, staleness thresholds,
   workload bands, working days and default deadlines** are all rows in `config`,
-  editable in Settings. None of them are hardcoded.
+  editable in Settings. None of them are hardcoded. (Break types are the one
+  deliberate exception — see "Break tracking" above.)
 - **Integrations** (Slack, Teams, Jira, and so on) fit as new files under
   `src/routes/`. The data model is already normalised enough to answer questions
   like "which tasks have been blocked for more than two days" or "what did the

@@ -1,35 +1,73 @@
 /**
- * Database access. SQLite via better-sqlite3 (synchronous, which is the right
- * shape for a single-process internal tool — no connection pool to reason about).
+ * Database access. MySQL via mysql2/promise, through a connection pool — the
+ * app is a single Node process but requests are concurrent, so every export
+ * here is async (unlike the SQLite/better-sqlite3 version this replaced,
+ * which was synchronous). Every call site elsewhere in the app awaits these.
  *
  * Rows are stored snake_case and handed to the API camelCase, so the SQL stays
  * idiomatic and the JSON the browser sees stays idiomatic too. The mapping
  * lives here and nowhere else.
  */
-import Database from "better-sqlite3";
+import mysql from "mysql2/promise";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = process.env.DATABASE_PATH || path.join(HERE, "..", "data", "tcc.db");
 
-fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-export const db = new Database(DB_PATH);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
-db.exec(fs.readFileSync(path.join(HERE, "schema.sql"), "utf8"));
+// Connecting (and validating DATABASE_URL) is lazy, triggered by the first
+// real query rather than by importing this module — a few call paths (e.g.
+// scripts/notif-test.js) import src/domain.js, which imports getConfig from
+// here, but never actually call it; those must stay usable with no database
+// configured at all, the same way they were before this file talked to a
+// network service instead of always-available local SQLite.
+let pool = null;
+let schemaReady = null;
 
-// Older databases predate the breaks.kind column; CREATE TABLE IF NOT EXISTS
-// above is a no-op against an existing table, so add it here if missing.
-// A plain nullable column needs no table-recreate dance (unlike the
-// email -> username migration, which had to add a UNIQUE constraint).
-if (!db.prepare("PRAGMA table_info(breaks)").all().some(c => c.name === "kind")) {
-  db.exec("ALTER TABLE breaks ADD COLUMN kind TEXT");
+function getPool() {
+  if (!pool) {
+    const DATABASE_URL = process.env.DATABASE_URL;
+    if (!DATABASE_URL) {
+      console.error("\n  DATABASE_URL is not set. See .env.example.\n");
+      process.exit(1);
+    }
+    pool = mysql.createPool({ uri: DATABASE_URL, waitForConnections: true, connectionLimit: 10 });
+  }
+  return pool;
+}
+
+// Schema is applied on every boot via CREATE TABLE IF NOT EXISTS (a no-op
+// against tables that already exist) — same idea as the old SQLite version,
+// just over a one-off connection with multipleStatements enabled so the
+// whole schema.sql file can run in one shot. The regular pool above never
+// gets multipleStatements, so ordinary query traffic can't smuggle extra
+// statements through a single placeholder.
+async function applySchema() {
+  const sql = fs.readFileSync(path.join(HERE, "schema.sql"), "utf8");
+  const conn = await mysql.createConnection({ uri: process.env.DATABASE_URL, multipleStatements: true });
+  try { await conn.query(sql); }
+  finally { await conn.end(); }
+}
+
+/** Every exported function funnels through this — ensures the pool exists and
+ *  schema.sql has run before the first real query, memoized so concurrent
+ *  callers (e.g. a Promise.all of several queries) only trigger it once. */
+async function exec(sql, params) {
+  const p = getPool();
+  if (!schemaReady) schemaReady = applySchema();
+  await schemaReady;
+  return p.execute(sql, params);
 }
 
 export const now = () => new Date().toISOString();
 const J = (v, fallback) => { try { return v == null ? fallback : JSON.parse(v); } catch { return fallback; } };
+
+/** Used only by seed scripts to reset to an empty database. Order matters: children before parents. */
+export async function wipeAllTables() {
+  for (const table of ["task_activity", "task_comments", "tasks", "daily_updates", "projects", "sessions", "employees", "config"]) {
+    await exec(`DELETE FROM ${table}`);
+  }
+}
 
 /* ------------------------------------------------------------------ config */
 
@@ -61,14 +99,16 @@ export const DEFAULT_CONFIG = {
   notify: { assigned: true, priority: true, dueSoon: true, overdue: true, blocked: true, comment: true, completed: false, reassigned: true, dependency: true, attachment: true }
 };
 
-export function getConfig() {
-  const row = db.prepare("SELECT value FROM config WHERE key = 'settings'").get();
-  return row ? { ...DEFAULT_CONFIG, ...J(row.value, {}) } : { ...DEFAULT_CONFIG };
+export async function getConfig() {
+  const [rows] = await exec("SELECT value FROM config WHERE `key` = 'settings'");
+  return rows[0] ? { ...DEFAULT_CONFIG, ...J(rows[0].value, {}) } : { ...DEFAULT_CONFIG };
 }
-export function setConfig(value) {
-  db.prepare(`INSERT INTO config (key, value, updated_at) VALUES ('settings', ?, ?)
-              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
-    .run(JSON.stringify(value), now());
+export async function setConfig(value) {
+  await exec(
+    "INSERT INTO config (`key`, value, updated_at) VALUES ('settings', ?, ?) " +
+    "ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)",
+    [JSON.stringify(value), now()]
+  );
   return getConfig();
 }
 
@@ -86,33 +126,40 @@ const employeeOut = r => r && ({
   createdAt: r.created_at, updatedAt: r.updated_at
 });
 
-export const listEmployees = () =>
-  db.prepare("SELECT * FROM employees ORDER BY name").all().map(employeeOut);
-export const getEmployee = id =>
-  employeeOut(db.prepare("SELECT * FROM employees WHERE id = ?").get(id));
-export const getEmployeeByUsername = username =>
-  db.prepare("SELECT * FROM employees WHERE username = ? COLLATE NOCASE").get(String(username || "").trim());
-export const getPasswordHash = id =>
-  (db.prepare("SELECT password_hash FROM employees WHERE id = ?").get(id) || {}).password_hash;
+export async function listEmployees() {
+  const [rows] = await exec("SELECT * FROM employees ORDER BY name");
+  return rows.map(employeeOut);
+}
+export async function getEmployee(id) {
+  const [rows] = await exec("SELECT * FROM employees WHERE id = ?", [id]);
+  return employeeOut(rows[0]);
+}
+export async function getEmployeeByUsername(username) {
+  const [rows] = await exec("SELECT * FROM employees WHERE username = ?", [String(username || "").trim()]);
+  return rows[0];                       // username's column collation is already case-insensitive
+}
+export async function getPasswordHash(id) {
+  const [rows] = await exec("SELECT password_hash FROM employees WHERE id = ?", [id]);
+  return (rows[0] || {}).password_hash;
+}
 
 /** lowercase, collapse non-alphanumeric runs to ".", trim edge dots. Pure — no DB access. */
 export const slugifyName = name =>
   String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "") || "user";
 
 /** Turn "John Doe" into a unique User ID ("john.doe", "john.doe2", ...) against the live table. */
-export function usernameFor(name, excludeId) {
+export async function usernameFor(name, excludeId) {
   const base = slugifyName(name);
+  const [rows] = await exec("SELECT id, username FROM employees");
   const taken = new Set(
-    db.prepare("SELECT id, username FROM employees").all()
-      .filter(r => r.id !== excludeId)
-      .map(r => r.username.toLowerCase())
+    rows.filter(r => r.id !== excludeId).map(r => r.username.toLowerCase())
   );
   if (!taken.has(base)) return base;
   let n = 2;
   while (taken.has(base + n)) n++;
   return base + n;
 }
-/** Same dedup rule as usernameFor, but against an in-memory set — for building a batch (e.g. a migration) at once. */
+/** Same dedup rule as usernameFor, but against an in-memory set — for building a batch (e.g. a seed run) at once. */
 export function usernameForBatch(name, takenSet) {
   const base = slugifyName(name);
   let candidate = base, n = 2;
@@ -121,101 +168,37 @@ export function usernameForBatch(name, takenSet) {
   return candidate;
 }
 
-/**
- * One-time migration: older databases still have `employees.email` instead of
- * `username`. schema.sql's CREATE TABLE IF NOT EXISTS is a no-op against an
- * existing table, so this runs once here instead. No-op on any database
- * already on the current schema (including a brand-new, empty one).
- */
-(function migrateEmailToUsername() {
-  const cols = db.prepare("PRAGMA table_info(employees)").all().map(c => c.name);
-  if (!cols.includes("email") || cols.includes("username")) return;
-
-  const rows = db.prepare("SELECT * FROM employees").all();
-  const taken = new Set();
-  const withUsername = rows.map(r => ({ ...r, username: usernameForBatch(r.name, taken) }));
-
-  const migrate = db.transaction(() => {
-    db.exec(`
-      CREATE TABLE employees_new (
-        id                   TEXT PRIMARY KEY,
-        name                 TEXT NOT NULL,
-        initials             TEXT NOT NULL DEFAULT '',
-        username             TEXT NOT NULL UNIQUE COLLATE NOCASE,
-        password_hash        TEXT,
-        must_change_password INTEGER NOT NULL DEFAULT 0,
-        role                 TEXT NOT NULL DEFAULT 'employee' CHECK (role IN ('manager','employee')),
-        title                TEXT NOT NULL DEFAULT '',
-        department_id        TEXT NOT NULL DEFAULT '',
-        team_id              TEXT NOT NULL DEFAULT '',
-        manager_id           TEXT REFERENCES employees(id) ON DELETE SET NULL,
-        capacity_hours       INTEGER NOT NULL DEFAULT 40,
-        color                TEXT NOT NULL DEFAULT '#0E7C86',
-        active               INTEGER NOT NULL DEFAULT 1,
-        last_login_at        TEXT,
-        created_at           TEXT NOT NULL,
-        updated_at           TEXT NOT NULL
-      );
-    `);
-    const insert = db.prepare(`
-      INSERT INTO employees_new (id, name, initials, username, password_hash, must_change_password,
-        role, title, department_id, team_id, manager_id, capacity_hours, color, active, last_login_at,
-        created_at, updated_at)
-      VALUES (@id, @name, @initials, @username, @password_hash, @must_change_password,
-        @role, @title, @department_id, @team_id, @manager_id, @capacity_hours, @color, @active, @last_login_at,
-        @created_at, @updated_at)
-    `);
-    for (const r of withUsername) insert.run(r);
-    db.exec(`
-      DROP TABLE employees;
-      ALTER TABLE employees_new RENAME TO employees;
-      CREATE INDEX IF NOT EXISTS idx_employees_active ON employees(active);
-      CREATE INDEX IF NOT EXISTS idx_employees_team   ON employees(department_id, team_id);
-    `);
-  });
-
-  // foreign_keys can only be toggled outside a transaction, hence these sit
-  // before/after migrate() rather than inside it.
-  db.pragma("foreign_keys = OFF");
-  migrate();
-  db.pragma("foreign_keys = ON");
-  const violations = db.pragma("foreign_key_check");
-  if (violations.length) throw new Error("employees username migration broke a foreign key: " + JSON.stringify(violations));
-
-  console.log(`Migrated ${withUsername.length} employee(s) from email to a generated User ID.`);
-})();
-
-export function upsertEmployee(e) {
+export async function upsertEmployee(e) {
   const t = now();
-  const existing = db.prepare("SELECT id, created_at FROM employees WHERE id = ?").get(e.id);
-  db.prepare(`
+  const [existingRows] = await exec("SELECT id, created_at FROM employees WHERE id = ?", [e.id]);
+  const existing = existingRows[0];
+  await exec(`
     INSERT INTO employees (id, name, initials, username, role, title, department_id, team_id,
                            manager_id, capacity_hours, color, active, created_at, updated_at)
-    VALUES (@id, @name, @initials, @username, @role, @title, @department_id, @team_id,
-            @manager_id, @capacity_hours, @color, @active, @created_at, @updated_at)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name, initials = excluded.initials, username = excluded.username,
-      role = excluded.role, title = excluded.title, department_id = excluded.department_id,
-      team_id = excluded.team_id, manager_id = excluded.manager_id,
-      capacity_hours = excluded.capacity_hours, color = excluded.color,
-      active = excluded.active, updated_at = excluded.updated_at
-  `).run({
-    id: e.id, name: e.name, initials: e.initials || "", username: e.username,
-    role: e.role === "manager" ? "manager" : "employee", title: e.title || "",
-    department_id: e.departmentId || "", team_id: e.teamId || "",
-    manager_id: e.managerId || null, capacity_hours: e.capacityHours || 40,
-    color: e.color || "#0E7C86", active: e.active === false ? 0 : 1,
-    created_at: existing ? existing.created_at : t, updated_at: t
-  });
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      name = VALUES(name), initials = VALUES(initials), username = VALUES(username),
+      role = VALUES(role), title = VALUES(title), department_id = VALUES(department_id),
+      team_id = VALUES(team_id), manager_id = VALUES(manager_id),
+      capacity_hours = VALUES(capacity_hours), color = VALUES(color),
+      active = VALUES(active), updated_at = VALUES(updated_at)
+  `, [
+    e.id, e.name, e.initials || "", e.username,
+    e.role === "manager" ? "manager" : "employee", e.title || "",
+    e.departmentId || "", e.teamId || "",
+    e.managerId || null, e.capacityHours || 40,
+    e.color || "#0E7C86", e.active === false ? 0 : 1,
+    existing ? existing.created_at : t, t
+  ]);
   return getEmployee(e.id);
 }
-export const setPassword = (id, hash, mustChange = 0) =>
-  db.prepare("UPDATE employees SET password_hash = ?, must_change_password = ?, updated_at = ? WHERE id = ?")
-    .run(hash, mustChange ? 1 : 0, now(), id);
-export const touchLogin = id =>
-  db.prepare("UPDATE employees SET last_login_at = ? WHERE id = ?").run(now(), id);
-export const deleteEmployee = id =>
-  db.prepare("UPDATE employees SET active = 0, updated_at = ? WHERE id = ?").run(now(), id);
+export const setPassword = async (id, hash, mustChange = 0) =>
+  exec("UPDATE employees SET password_hash = ?, must_change_password = ?, updated_at = ? WHERE id = ?",
+    [hash, mustChange ? 1 : 0, now(), id]);
+export const touchLogin = async id =>
+  exec("UPDATE employees SET last_login_at = ? WHERE id = ?", [now(), id]);
+export const deleteEmployee = async id =>
+  exec("UPDATE employees SET active = 0, updated_at = ? WHERE id = ?", [now(), id]);
 
 /* ---------------------------------------------------------------- projects */
 
@@ -224,30 +207,35 @@ const projectOut = r => r && ({
   startDate: r.start_date, targetDate: r.target_date, status: r.status,
   createdAt: r.created_at, updatedAt: r.updated_at
 });
-export const listProjects = () =>
-  db.prepare("SELECT * FROM projects ORDER BY name").all().map(projectOut);
-export const getProject = id =>
-  projectOut(db.prepare("SELECT * FROM projects WHERE id = ?").get(id));
+export async function listProjects() {
+  const [rows] = await exec("SELECT * FROM projects ORDER BY name");
+  return rows.map(projectOut);
+}
+export async function getProject(id) {
+  const [rows] = await exec("SELECT * FROM projects WHERE id = ?", [id]);
+  return projectOut(rows[0]);
+}
 
-export function upsertProject(p) {
+export async function upsertProject(p) {
   const t = now();
-  const existing = db.prepare("SELECT created_at FROM projects WHERE id = ?").get(p.id);
-  db.prepare(`
+  const [existingRows] = await exec("SELECT created_at FROM projects WHERE id = ?", [p.id]);
+  const existing = existingRows[0];
+  await exec(`
     INSERT INTO projects (id, name, code, owner_id, description, start_date, target_date, status, created_at, updated_at)
-    VALUES (@id, @name, @code, @owner_id, @description, @start_date, @target_date, @status, @created_at, @updated_at)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name, code = excluded.code, owner_id = excluded.owner_id,
-      description = excluded.description, start_date = excluded.start_date,
-      target_date = excluded.target_date, status = excluded.status, updated_at = excluded.updated_at
-  `).run({
-    id: p.id, name: p.name, code: p.code || "", owner_id: p.ownerId || null,
-    description: p.description || "", start_date: p.startDate || null,
-    target_date: p.targetDate || null, status: p.status || "ACTIVE",
-    created_at: existing ? existing.created_at : t, updated_at: t
-  });
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      name = VALUES(name), code = VALUES(code), owner_id = VALUES(owner_id),
+      description = VALUES(description), start_date = VALUES(start_date),
+      target_date = VALUES(target_date), status = VALUES(status), updated_at = VALUES(updated_at)
+  `, [
+    p.id, p.name, p.code || "", p.ownerId || null,
+    p.description || "", p.startDate || null,
+    p.targetDate || null, p.status || "ACTIVE",
+    existing ? existing.created_at : t, t
+  ]);
   return getProject(p.id);
 }
-export const deleteProject = id => db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+export const deleteProject = async id => exec("DELETE FROM projects WHERE id = ?", [id]);
 
 /* ------------------------------------------------------------------- tasks */
 
@@ -269,84 +257,99 @@ const activityOut = a => ({ id: a.id, at: a.at, byId: a.by_id, byName: a.by_name
 const attachmentOut = a => ({ id: a.id, name: a.original_name, mimeType: a.mime_type, size: a.size, uploadedById: a.uploaded_by_id, uploadedAt: a.uploaded_at });
 
 /** All tasks with their comments, activity and attachments, assembled in four
- *  queries rather than 4N — this is what keeps the dashboard fast at 10k rows. */
-export function listTasks() {
-  const rows = db.prepare("SELECT * FROM tasks").all();
+ *  parallel queries rather than 4N — this is what keeps the dashboard fast at 10k rows. */
+export async function listTasks() {
+  const [[rows], [comments], [activities], [attachments]] = await Promise.all([
+    exec("SELECT * FROM tasks"),
+    exec("SELECT * FROM task_comments ORDER BY at"),
+    exec("SELECT * FROM task_activity ORDER BY at"),
+    exec("SELECT * FROM task_attachments ORDER BY uploaded_at")
+  ]);
   const cs = {}, as = {}, fs_ = {};
-  for (const c of db.prepare("SELECT * FROM task_comments ORDER BY at").all()) (cs[c.task_id] ||= []).push(commentOut(c));
-  for (const a of db.prepare("SELECT * FROM task_activity ORDER BY at").all()) (as[a.task_id] ||= []).push(activityOut(a));
-  for (const f of db.prepare("SELECT * FROM task_attachments ORDER BY uploaded_at").all()) (fs_[f.task_id] ||= []).push(attachmentOut(f));
+  for (const c of comments) (cs[c.task_id] ||= []).push(commentOut(c));
+  for (const a of activities) (as[a.task_id] ||= []).push(activityOut(a));
+  for (const f of attachments) (fs_[f.task_id] ||= []).push(attachmentOut(f));
   return rows.map(r => taskOut(r, cs[r.id], as[r.id], fs_[r.id]));
 }
-export function getTask(id) {
-  const r = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
+export async function getTask(id) {
+  const [rows] = await exec("SELECT * FROM tasks WHERE id = ?", [id]);
+  const r = rows[0];
   if (!r) return null;
-  return taskOut(r,
-    db.prepare("SELECT * FROM task_comments WHERE task_id = ? ORDER BY at").all(id).map(commentOut),
-    db.prepare("SELECT * FROM task_activity WHERE task_id = ? ORDER BY at").all(id).map(activityOut),
-    db.prepare("SELECT * FROM task_attachments WHERE task_id = ? ORDER BY uploaded_at").all(id).map(attachmentOut));
+  const [[comments], [activities], [attachments]] = await Promise.all([
+    exec("SELECT * FROM task_comments WHERE task_id = ? ORDER BY at", [id]),
+    exec("SELECT * FROM task_activity WHERE task_id = ? ORDER BY at", [id]),
+    exec("SELECT * FROM task_attachments WHERE task_id = ? ORDER BY uploaded_at", [id])
+  ]);
+  return taskOut(r, comments.map(commentOut), activities.map(activityOut), attachments.map(attachmentOut));
 }
 
-export function upsertTask(t) {
+export async function upsertTask(t) {
   const ts = now();
-  const existing = db.prepare("SELECT created_at FROM tasks WHERE id = ?").get(t.id);
+  const [existingRows] = await exec("SELECT created_at FROM tasks WHERE id = ?", [t.id]);
+  const existing = existingRows[0];
   const num = v => (v === "" || v == null || isNaN(Number(v))) ? null : Number(v);
-  db.prepare(`
+  await exec(`
     INSERT INTO tasks (id, title, description, assignee_id, created_by_id, department_id, team_id,
       project_id, category, priority, status, progress, start_date, due_date, expected_completion,
       completed_at, estimated_hours, actual_hours, reopen_count, tags, blocker, dependencies, links,
       created_at, updated_at)
-    VALUES (@id, @title, @description, @assignee_id, @created_by_id, @department_id, @team_id,
-      @project_id, @category, @priority, @status, @progress, @start_date, @due_date, @expected_completion,
-      @completed_at, @estimated_hours, @actual_hours, @reopen_count, @tags, @blocker, @dependencies, @links,
-      @created_at, @updated_at)
-    ON CONFLICT(id) DO UPDATE SET
-      title = excluded.title, description = excluded.description, assignee_id = excluded.assignee_id,
-      department_id = excluded.department_id, team_id = excluded.team_id, project_id = excluded.project_id,
-      category = excluded.category, priority = excluded.priority, status = excluded.status,
-      progress = excluded.progress, start_date = excluded.start_date, due_date = excluded.due_date,
-      expected_completion = excluded.expected_completion, completed_at = excluded.completed_at,
-      estimated_hours = excluded.estimated_hours, actual_hours = excluded.actual_hours,
-      reopen_count = excluded.reopen_count, tags = excluded.tags, blocker = excluded.blocker,
-      dependencies = excluded.dependencies, links = excluded.links, updated_at = excluded.updated_at
-  `).run({
-    id: t.id, title: t.title, description: t.description || "",
-    assignee_id: t.assigneeId || null, created_by_id: t.createdById || null,
-    department_id: t.departmentId || "", team_id: t.teamId || "",
-    project_id: t.projectId || null, category: t.category || "",
-    priority: t.priority, status: t.status, progress: Number(t.progress) || 0,
-    start_date: t.startDate || null, due_date: t.dueDate || null,
-    expected_completion: t.expectedCompletion || null, completed_at: t.completedAt || null,
-    estimated_hours: num(t.estimatedHours), actual_hours: num(t.actualHours),
-    reopen_count: Number(t.reopenCount) || 0,
-    tags: JSON.stringify(t.tags || []),
-    blocker: t.blocker ? JSON.stringify(t.blocker) : null,
-    dependencies: JSON.stringify(t.dependencies || []),
-    links: JSON.stringify(t.links || []),
-    created_at: existing ? existing.created_at : (t.createdAt || ts),
-    updated_at: t.updatedAt || ts
-  });
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      title = VALUES(title), description = VALUES(description), assignee_id = VALUES(assignee_id),
+      department_id = VALUES(department_id), team_id = VALUES(team_id), project_id = VALUES(project_id),
+      category = VALUES(category), priority = VALUES(priority), status = VALUES(status),
+      progress = VALUES(progress), start_date = VALUES(start_date), due_date = VALUES(due_date),
+      expected_completion = VALUES(expected_completion), completed_at = VALUES(completed_at),
+      estimated_hours = VALUES(estimated_hours), actual_hours = VALUES(actual_hours),
+      reopen_count = VALUES(reopen_count), tags = VALUES(tags), blocker = VALUES(blocker),
+      dependencies = VALUES(dependencies), links = VALUES(links), updated_at = VALUES(updated_at)
+  `, [
+    t.id, t.title, t.description || "",
+    t.assigneeId || null, t.createdById || null,
+    t.departmentId || "", t.teamId || "",
+    t.projectId || null, t.category || "",
+    t.priority, t.status, Number(t.progress) || 0,
+    t.startDate || null, t.dueDate || null,
+    t.expectedCompletion || null, t.completedAt || null,
+    num(t.estimatedHours), num(t.actualHours),
+    Number(t.reopenCount) || 0,
+    JSON.stringify(t.tags || []),
+    t.blocker ? JSON.stringify(t.blocker) : null,
+    JSON.stringify(t.dependencies || []),
+    JSON.stringify(t.links || []),
+    existing ? existing.created_at : (t.createdAt || ts),
+    t.updatedAt || ts
+  ]);
   return t.id;
 }
-export const deleteTask = id => db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+export const deleteTask = async id => exec("DELETE FROM tasks WHERE id = ?", [id]);
 
-export const addComment = (taskId, c) =>
-  db.prepare("INSERT INTO task_comments (id, task_id, author_id, at, body, manager_note) VALUES (?,?,?,?,?,?)")
-    .run(c.id, taskId, c.authorId || null, c.at, c.body, c.managerNote ? 1 : 0);
-export const commentIds = taskId =>
-  db.prepare("SELECT id FROM task_comments WHERE task_id = ?").all(taskId).map(r => r.id);
+export const addComment = async (taskId, c) =>
+  exec("INSERT INTO task_comments (id, task_id, author_id, at, body, manager_note) VALUES (?, ?, ?, ?, ?, ?)",
+    [c.id, taskId, c.authorId || null, c.at, c.body, c.managerNote ? 1 : 0]);
+export async function commentIds(taskId) {
+  const [rows] = await exec("SELECT id FROM task_comments WHERE task_id = ?", [taskId]);
+  return rows.map(r => r.id);
+}
 
-export const addActivity = (taskId, a) =>
-  db.prepare("INSERT INTO task_activity (id, task_id, at, by_id, by_name, kind, field, from_value, to_value, note) VALUES (?,?,?,?,?,?,?,?,?,?)")
-    .run(a.id, taskId, a.at, a.byId || null, a.byName || "", a.kind, a.field || null,
-         a.from == null ? null : String(a.from), a.to == null ? null : String(a.to), a.note || null);
+export const addActivity = async (taskId, a) =>
+  exec(
+    "INSERT INTO task_activity (id, task_id, at, by_id, by_name, kind, field, from_value, to_value, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [a.id, taskId, a.at, a.byId || null, a.byName || "", a.kind, a.field || null,
+     a.from == null ? null : String(a.from), a.to == null ? null : String(a.to), a.note || null]
+  );
 
-export const addAttachment = (taskId, a) =>
-  db.prepare(`INSERT INTO task_attachments (id, task_id, filename, original_name, mime_type, size, uploaded_by_id, uploaded_at)
-              VALUES (?,?,?,?,?,?,?,?)`)
-    .run(a.id, taskId, a.filename, a.originalName, a.mimeType || "", a.size || 0, a.uploadedById || null, a.uploadedAt);
-export const getAttachmentRow = id => db.prepare("SELECT * FROM task_attachments WHERE id = ?").get(id);
-export const deleteAttachmentRow = id => db.prepare("DELETE FROM task_attachments WHERE id = ?").run(id);
+export const addAttachment = async (taskId, a) =>
+  exec(
+    `INSERT INTO task_attachments (id, task_id, filename, original_name, mime_type, size, uploaded_by_id, uploaded_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [a.id, taskId, a.filename, a.originalName, a.mimeType || "", a.size || 0, a.uploadedById || null, a.uploadedAt]
+  );
+export async function getAttachmentRow(id) {
+  const [rows] = await exec("SELECT * FROM task_attachments WHERE id = ?", [id]);
+  return rows[0];
+}
+export const deleteAttachmentRow = async id => exec("DELETE FROM task_attachments WHERE id = ?", [id]);
 
 /* ------------------------------------------------------------- notifications */
 
@@ -355,46 +358,54 @@ const notificationOut = r => ({
   kind: r.kind, text: r.text, at: r.created_at, readAt: r.read_at
 });
 
-export const addNotification = n =>
-  db.prepare(`INSERT INTO notifications (id, employee_id, task_id, activity_id, kind, text, created_at, read_at)
-              VALUES (?,?,?,?,?,?,?,?)`)
-    .run(n.id, n.employeeId, n.taskId || null, n.activityId || null, n.kind, n.text, n.createdAt, n.readAt || null);
+export const addNotification = async n =>
+  exec(
+    `INSERT INTO notifications (id, employee_id, task_id, activity_id, kind, text, created_at, read_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [n.id, n.employeeId, n.taskId || null, n.activityId || null, n.kind, n.text, n.createdAt, n.readAt || null]
+  );
 
 /** One employee's notifications, most recent first, capped like the old client-side list was. */
-export const listNotifications = (employeeId, limit = 40) =>
-  db.prepare("SELECT * FROM notifications WHERE employee_id = ? ORDER BY created_at DESC LIMIT ?")
-    .all(employeeId, limit).map(notificationOut);
-
-export const getNotification = id => {
-  const r = db.prepare("SELECT * FROM notifications WHERE id = ?").get(id);
-  return r ? notificationOut(r) : null;
-};
-
-export const markNotificationRead = (id, employeeId, at) =>
-  db.prepare("UPDATE notifications SET read_at = ? WHERE id = ? AND employee_id = ?").run(at, id, employeeId);
-
-export const markAllNotificationsRead = (employeeId, at) =>
-  db.prepare("UPDATE notifications SET read_at = ? WHERE employee_id = ? AND read_at IS NULL").run(at, employeeId);
-
-/** A single employee's overrides on top of the global notify defaults. */
-export const getEmployeeNotifyPrefs = employeeId => {
-  const out = {};
-  for (const r of db.prepare("SELECT key, value FROM employee_notify_prefs WHERE employee_id = ?").all(employeeId)) {
-    out[r.key] = !!r.value;
-  }
-  return out;
-};
-export function setEmployeeNotifyPrefs(employeeId, patch) {
-  const ts = now();
-  const stmt = db.prepare(`
-    INSERT INTO employee_notify_prefs (employee_id, key, value, updated_at) VALUES (?,?,?,?)
-    ON CONFLICT(employee_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-  `);
-  for (const [key, value] of Object.entries(patch || {})) stmt.run(employeeId, key, value ? 1 : 0, ts);
+export async function listNotifications(employeeId, limit = 40) {
+  const [rows] = await exec(
+    "SELECT * FROM notifications WHERE employee_id = ? ORDER BY created_at DESC LIMIT ?",
+    [employeeId, limit]
+  );
+  return rows.map(notificationOut);
 }
 
-export function nextTaskId() {
-  const row = db.prepare("SELECT id FROM tasks WHERE id LIKE 'TSK-%' ORDER BY id DESC LIMIT 1").get();
+export async function getNotification(id) {
+  const [rows] = await exec("SELECT * FROM notifications WHERE id = ?", [id]);
+  return rows[0] ? notificationOut(rows[0]) : null;
+}
+
+export const markNotificationRead = async (id, employeeId, at) =>
+  exec("UPDATE notifications SET read_at = ? WHERE id = ? AND employee_id = ?", [at, id, employeeId]);
+
+export const markAllNotificationsRead = async (employeeId, at) =>
+  exec("UPDATE notifications SET read_at = ? WHERE employee_id = ? AND read_at IS NULL", [at, employeeId]);
+
+/** A single employee's overrides on top of the global notify defaults. */
+export async function getEmployeeNotifyPrefs(employeeId) {
+  const [rows] = await exec("SELECT `key`, value FROM employee_notify_prefs WHERE employee_id = ?", [employeeId]);
+  const out = {};
+  for (const r of rows) out[r.key] = !!r.value;
+  return out;
+}
+export async function setEmployeeNotifyPrefs(employeeId, patch) {
+  const ts = now();
+  await Promise.all(Object.entries(patch || {}).map(([key, value]) =>
+    exec(
+      "INSERT INTO employee_notify_prefs (employee_id, `key`, value, updated_at) VALUES (?, ?, ?, ?) " +
+      "ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)",
+      [employeeId, key, value ? 1 : 0, ts]
+    )
+  ));
+}
+
+export async function nextTaskId() {
+  const [rows] = await exec("SELECT id FROM tasks WHERE id LIKE 'TSK-%' ORDER BY id DESC LIMIT 1");
+  const row = rows[0];
   const n = row ? Number(String(row.id).slice(4)) : 0;
   return "TSK-" + String((isNaN(n) ? 0 : n) + 1).padStart(4, "0");
 }
@@ -404,24 +415,24 @@ export function nextTaskId() {
 const updateOut = r => ({ date: r.date, at: r.at, completed: r.completed, current: r.current, next: r.next, blocked: r.blocked, help: r.help, note: r.note });
 
 /** Grouped per employee, matching the shape the dashboard renders. */
-export function listUpdates() {
-  const rows = db.prepare("SELECT * FROM daily_updates ORDER BY date").all();
+export async function listUpdates() {
+  const [rows] = await exec("SELECT * FROM daily_updates ORDER BY date");
   const byEmp = {};
   for (const r of rows) (byEmp[r.employee_id] ||= { id: r.employee_id, employeeId: r.employee_id, entries: [] }).entries.push(updateOut(r));
   return Object.values(byEmp);
 }
-export function upsertUpdate(employeeId, e) {
-  db.prepare(`
+export async function upsertUpdate(employeeId, e) {
+  await exec(`
     INSERT INTO daily_updates (id, employee_id, date, at, completed, current, next, blocked, help, note)
-    VALUES (@id, @employee_id, @date, @at, @completed, @current, @next, @blocked, @help, @note)
-    ON CONFLICT(employee_id, date) DO UPDATE SET
-      at = excluded.at, completed = excluded.completed, current = excluded.current,
-      next = excluded.next, blocked = excluded.blocked, help = excluded.help, note = excluded.note
-  `).run({
-    id: employeeId + ":" + e.date, employee_id: employeeId, date: e.date, at: e.at || now(),
-    completed: e.completed || "", current: e.current || "", next: e.next || "",
-    blocked: e.blocked || "", help: e.help || "", note: e.note || ""
-  });
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      at = VALUES(at), completed = VALUES(completed), current = VALUES(current),
+      next = VALUES(next), blocked = VALUES(blocked), help = VALUES(help), note = VALUES(note)
+  `, [
+    employeeId + ":" + e.date, employeeId, e.date, e.at || now(),
+    e.completed || "", e.current || "", e.next || "",
+    e.blocked || "", e.help || "", e.note || ""
+  ]);
 }
 
 /* -------------------------------------------------------------------- breaks */
@@ -432,46 +443,63 @@ const breakOut = r => r && ({
 });
 
 /** One employee's break history, most recent first. */
-export const listBreaks = employeeId =>
-  db.prepare("SELECT * FROM breaks WHERE employee_id = ? ORDER BY started_at DESC").all(employeeId).map(breakOut);
+export async function listBreaks(employeeId) {
+  const [rows] = await exec("SELECT * FROM breaks WHERE employee_id = ? ORDER BY started_at DESC", [employeeId]);
+  return rows.map(breakOut);
+}
 
 /** Every break for every employee — used for the manager-wide bootstrap. */
-export const listAllBreaks = () =>
-  db.prepare("SELECT * FROM breaks ORDER BY started_at DESC").all().map(breakOut);
+export async function listAllBreaks() {
+  const [rows] = await exec("SELECT * FROM breaks ORDER BY started_at DESC");
+  return rows.map(breakOut);
+}
 
 /** The break in progress for someone, or null. */
-export const getOpenBreak = employeeId =>
-  breakOut(db.prepare("SELECT * FROM breaks WHERE employee_id = ? AND ended_at IS NULL").get(employeeId));
+export async function getOpenBreak(employeeId) {
+  const [rows] = await exec("SELECT * FROM breaks WHERE employee_id = ? AND ended_at IS NULL", [employeeId]);
+  return breakOut(rows[0]);
+}
 
-/** Has this person already started this break kind today (any status)? Backs the once-per-type-per-day rule. */
-export const usedBreakKindToday = (employeeId, kind) =>
-  !!db.prepare("SELECT 1 FROM breaks WHERE employee_id = ? AND kind = ? AND date(started_at) = date('now') LIMIT 1")
-    .get(employeeId, kind);
+/** Has this person already started this break kind today (any status)? Backs the once-per-type-per-day rule.
+ *  started_at is a stored ISO-8601 UTC string, not a native DATETIME, so "today" is a plain string-prefix
+ *  compare against today's UTC date rather than a SQL date function. */
+export async function usedBreakKindToday(employeeId, kind) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [rows] = await exec(
+    "SELECT 1 FROM breaks WHERE employee_id = ? AND kind = ? AND LEFT(started_at, 10) = ? LIMIT 1",
+    [employeeId, kind, today]
+  );
+  return !!rows[0];
+}
 
-export function startBreak(id, employeeId, kind) {
+export async function startBreak(id, employeeId, kind) {
   const t = now();
-  db.prepare(`INSERT INTO breaks (id, employee_id, kind, started_at, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?)`).run(id, employeeId, kind, t, t, t);
+  await exec(`INSERT INTO breaks (id, employee_id, kind, started_at, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?)`, [id, employeeId, kind, t, t, t]);
   return getOpenBreak(employeeId);
 }
 
-export function endBreak(id) {
-  const row = db.prepare("SELECT * FROM breaks WHERE id = ?").get(id);
+export async function endBreak(id) {
+  const [rows] = await exec("SELECT * FROM breaks WHERE id = ?", [id]);
+  const row = rows[0];
   if (!row || row.ended_at) return breakOut(row);
   const t = now();
   const durationSec = Math.max(0, Math.round((new Date(t) - new Date(row.started_at)) / 1000));
-  db.prepare("UPDATE breaks SET ended_at = ?, duration_sec = ?, updated_at = ? WHERE id = ?")
-    .run(t, durationSec, t, id);
-  return breakOut(db.prepare("SELECT * FROM breaks WHERE id = ?").get(id));
+  await exec("UPDATE breaks SET ended_at = ?, duration_sec = ?, updated_at = ? WHERE id = ?",
+    [t, durationSec, t, id]);
+  const [rows2] = await exec("SELECT * FROM breaks WHERE id = ?", [id]);
+  return breakOut(rows2[0]);
 }
 
 /* ---------------------------------------------------------------- sessions */
 
-export const createSession = (id, employeeId, expiresAt) =>
-  db.prepare("INSERT INTO sessions (id, employee_id, created_at, expires_at) VALUES (?,?,?,?)")
-    .run(id, employeeId, now(), expiresAt);
-export const readSession = id =>
-  db.prepare("SELECT * FROM sessions WHERE id = ? AND expires_at > ?").get(id, now());
-export const dropSession = id => db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-export const dropSessionsFor = employeeId => db.prepare("DELETE FROM sessions WHERE employee_id = ?").run(employeeId);
-export const purgeSessions = () => db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now());
+export const createSession = async (id, employeeId, expiresAt) =>
+  exec("INSERT INTO sessions (id, employee_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+    [id, employeeId, now(), expiresAt]);
+export async function readSession(id) {
+  const [rows] = await exec("SELECT * FROM sessions WHERE id = ? AND expires_at > ?", [id, now()]);
+  return rows[0];
+}
+export const dropSession = async id => exec("DELETE FROM sessions WHERE id = ?", [id]);
+export const dropSessionsFor = async employeeId => exec("DELETE FROM sessions WHERE employee_id = ?", [employeeId]);
+export const purgeSessions = async () => exec("DELETE FROM sessions WHERE expires_at <= ?", [now()]);

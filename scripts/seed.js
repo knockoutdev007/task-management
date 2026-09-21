@@ -7,11 +7,16 @@
  * Dates in scripts/seed-data are anchored to a fixed day and shifted so the
  * demo always shows a believable "today": overdue work, work due now, and
  * work completed earlier in the week.
+ *
+ * Runs as a plain sequence of awaited writes, not a single transaction —
+ * db.js's exports are bound to a shared connection pool rather than one
+ * connection, so there's no cheap way to group them atomically. A failed
+ * run here leaves partial data; rerun with --reset to start clean.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { db, upsertEmployee, upsertProject, upsertTask, addComment, addActivity,
+import { wipeAllTables, upsertEmployee, upsertProject, upsertTask, addComment, addActivity,
          upsertUpdate, setConfig, listEmployees, setPassword, usernameForBatch } from "../src/db.js";
 import { hashPassword } from "../src/auth.js";
 
@@ -48,49 +53,44 @@ const files = sub => {
 
 if (RESET) {
   console.log("Wiping every table…");
-  db.exec(`DELETE FROM task_activity; DELETE FROM task_comments; DELETE FROM tasks;
-           DELETE FROM daily_updates; DELETE FROM projects; DELETE FROM sessions;
-           DELETE FROM employees; DELETE FROM config;`);
-} else if (listEmployees().length) {
+  await wipeAllTables();
+} else if ((await listEmployees()).length) {
   console.error("There are already people in this database. Use `npm run seed:reset` to replace everything.");
   process.exit(1);
 }
 
-const seed = db.transaction(() => {
-  setConfig(read("config", "settings.json"));
+await setConfig(read("config", "settings.json"));
 
-  const takenUsernames = new Set();
-  for (const f of files("employees")) {
-    const id = f.replace(".json", ""), e = read("employees", f);
-    upsertEmployee({ ...e, id, username: usernameForBatch(e.name, takenUsernames) });
-    setPassword(id, hashPassword(PASSWORD), 1);          // must change on first sign-in
-  }
-  for (const f of files("projects")) {
-    const id = f.replace(".json", ""), p = read("projects", f);
-    upsertProject({ ...p, id, startDate: shiftDate(p.startDate), targetDate: shiftDate(p.targetDate) });
-  }
-  for (const f of files("tasks")) {
-    const id = f.replace(".json", ""), t = read("tasks", f);
-    upsertTask({
-      ...t, id,
-      startDate: shiftDate(t.startDate), dueDate: shiftDate(t.dueDate),
-      expectedCompletion: shiftDate(t.expectedCompletion),
-      createdAt: shiftStamp(t.createdAt), updatedAt: shiftStamp(t.updatedAt),
-      completedAt: shiftStamp(t.completedAt),
-      blocker: t.blocker ? { ...t.blocker, since: shiftDate(t.blocker.since), expectedResolution: shiftDate(t.blocker.expectedResolution) } : null
-    });
-    // Fixture ids are only unique within their own task; these tables are global.
-    for (const c of t.comments || []) addComment(id, { ...c, id: `${id}:${c.id}`, at: shiftStamp(c.at) });
-    for (const a of t.activity || []) addActivity(id, { ...a, id: `${id}:${a.id}`, at: shiftStamp(a.at) });
-  }
-  for (const f of files("dailyUpdates")) {
-    const id = f.replace(".json", ""), u = read("dailyUpdates", f);
-    for (const e of u.entries || []) upsertUpdate(id, { ...e, date: shiftDate(e.date), at: shiftStamp(e.at) });
-  }
-});
-seed();
+const takenUsernames = new Set();
+for (const f of files("employees")) {
+  const id = f.replace(".json", ""), e = read("employees", f);
+  await upsertEmployee({ ...e, id, username: usernameForBatch(e.name, takenUsernames) });
+  await setPassword(id, hashPassword(PASSWORD), 1);          // must change on first sign-in
+}
+for (const f of files("projects")) {
+  const id = f.replace(".json", ""), p = read("projects", f);
+  await upsertProject({ ...p, id, startDate: shiftDate(p.startDate), targetDate: shiftDate(p.targetDate) });
+}
+for (const f of files("tasks")) {
+  const id = f.replace(".json", ""), t = read("tasks", f);
+  await upsertTask({
+    ...t, id,
+    startDate: shiftDate(t.startDate), dueDate: shiftDate(t.dueDate),
+    expectedCompletion: shiftDate(t.expectedCompletion),
+    createdAt: shiftStamp(t.createdAt), updatedAt: shiftStamp(t.updatedAt),
+    completedAt: shiftStamp(t.completedAt),
+    blocker: t.blocker ? { ...t.blocker, since: shiftDate(t.blocker.since), expectedResolution: shiftDate(t.blocker.expectedResolution) } : null
+  });
+  // Fixture ids are only unique within their own task; these tables are global.
+  for (const c of t.comments || []) await addComment(id, { ...c, id: `${id}:${c.id}`, at: shiftStamp(c.at) });
+  for (const a of t.activity || []) await addActivity(id, { ...a, id: `${id}:${a.id}`, at: shiftStamp(a.at) });
+}
+for (const f of files("dailyUpdates")) {
+  const id = f.replace(".json", ""), u = read("dailyUpdates", f);
+  for (const e of u.entries || []) await upsertUpdate(id, { ...e, date: shiftDate(e.date), at: shiftStamp(e.at) });
+}
 
-const people = listEmployees();
+const people = await listEmployees();
 const managers = people.filter(p => p.role === "manager");
 console.log(`
   Seeded ${people.length} people, ${files("projects").length} projects, ${files("tasks").length} tasks.
@@ -103,3 +103,4 @@ console.log(`
   Replace this demo team with your own in Settings → People,
   then bulk-reassign or delete the demo tasks from All tasks.
 `);
+process.exit(0);   // the connection pool otherwise keeps the process alive

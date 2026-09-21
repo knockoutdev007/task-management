@@ -11,13 +11,13 @@ if (!name) {
   process.exit(1);
 }
 
-const username = usernameFor(name);
+const username = await usernameFor(name);
 const id = "emp-" + username;
 const initials = name.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase();
-upsertEmployee({ id, name, username, initials, role: "manager", title: "Manager",
+await upsertEmployee({ id, name, username, initials, role: "manager", title: "Manager",
                  departmentId: "mkt", teamId: "seo", capacityHours: 40, active: true });
 const password = randomPassword();
-setPassword(id, hashPassword(password), 1);
+await setPassword(id, hashPassword(password), 1);
 
 console.log(`
   Manager created.
@@ -26,5 +26,6 @@ console.log(`
     Password: ${password}
 
   You'll be asked to change it after signing in.
-  ${listEmployees().length} people in the database.
+  ${(await listEmployees()).length} people in the database.
 `);
+process.exit(0);   // the connection pool otherwise keeps the process alive

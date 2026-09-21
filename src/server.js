@@ -15,6 +15,7 @@ import { mountAttachments } from "./routes/attachments.js";
 import { mountBreaks } from "./routes/breaks.js";
 import { mountNotifications } from "./routes/notifications.js";
 import { listEmployees } from "./db.js";
+import { wrap } from "./wrap.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(HERE, "..", "public");
@@ -41,7 +42,7 @@ mountAttachments(app, requireUser);
 mountBreaks(app, requireUser);
 mountNotifications(app, requireUser);
 
-app.get("/api/health", (_req, res) => res.json({ ok: true, people: listEmployees().length }));
+app.get("/api/health", wrap(async (_req, res) => res.json({ ok: true, people: (await listEmployees()).length })));
 
 app.use(express.static(PUBLIC, { index: "index.html", maxAge: process.env.NODE_ENV === "production" ? "1h" : 0 }));
 app.get("/api/*", (_req, res) => res.status(404).json({ error: "No such endpoint." }));
@@ -52,8 +53,8 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: "Something went wrong on the server." });
 });
 
-app.listen(PORT, () => {
-  const n = listEmployees().length;
+app.listen(PORT, async () => {
+  const n = (await listEmployees()).length;
   console.log(`\n  Team Control Center → http://localhost:${PORT}`);
   if (!n) console.log("  No people yet. Run:  npm run seed\n");
   else console.log(`  ${n} people in the database.\n`);

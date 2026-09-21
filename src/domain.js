@@ -75,8 +75,8 @@ export function applyFieldPermissions(user, incoming, stored) {
 /* ------------------------------------------------------------- validation */
 
 /** Mirrors the client-side rules. Returns { field: message }. */
-export function validateTask(t) {
-  const cfg = getConfig();
+export async function validateTask(t) {
+  const cfg = await getConfig();
   const errs = {};
   const d = s => { if (!s) return null; const x = new Date(String(s).length === 10 ? s + "T00:00:00Z" : s); return isNaN(x) ? null : x; };
 

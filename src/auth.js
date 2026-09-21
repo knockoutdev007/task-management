@@ -12,6 +12,7 @@ import {
   getEmployeeByUsername, getEmployee, getPasswordHash, setPassword,
   createSession, readSession, dropSession, dropSessionsFor, touchLogin, purgeSessions
 } from "./db.js";
+import { wrap } from "./wrap.js";
 
 const COOKIE = "tcc_session";
 const DAYS = Number(process.env.SESSION_DAYS || 14);
@@ -55,17 +56,21 @@ function clear(res) {
   res.setHeader("Set-Cookie", `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 }
 
-/** Attaches req.user when a valid session cookie is present. Never rejects. */
-export function attachUser(req, _res, next) {
-  const raw = parseCookies(req.headers.cookie)[COOKIE];
-  const id = raw && unstamp(raw);
-  if (id) {
-    const s = readSession(id);
-    if (s) {
-      const u = getEmployee(s.employee_id);
-      if (u && u.active) { req.user = u; req.sessionId = id; }
+/** Attaches req.user when a valid session cookie is present. Never rejects —
+ *  a lookup failure here just leaves the request unauthenticated rather than
+ *  taking down every route behind it. */
+export async function attachUser(req, _res, next) {
+  try {
+    const raw = parseCookies(req.headers.cookie)[COOKIE];
+    const id = raw && unstamp(raw);
+    if (id) {
+      const s = await readSession(id);
+      if (s) {
+        const u = await getEmployee(s.employee_id);
+        if (u && u.active) { req.user = u; req.sessionId = id; }
+      }
     }
-  }
+  } catch (e) { console.error(e); }
   next();
 }
 export const requireUser = (req, res, next) =>
@@ -90,42 +95,42 @@ const noteAttempt = key => {
 export function mountAuth(app) {
   setInterval(purgeSessions, 3600_000).unref();
 
-  app.post("/api/auth/login", (req, res) => {
+  app.post("/api/auth/login", wrap(async (req, res) => {
     const username = String(req.body?.username || "").trim().toLowerCase();
     const password = String(req.body?.password || "");
     const key = username + "|" + (req.ip || "");
     if (tooMany(key)) return res.status(429).json({ error: "Too many attempts. Wait 15 minutes and try again." });
 
-    const row = getEmployeeByUsername(username);
+    const row = await getEmployeeByUsername(username);
     const ok = row && row.active && row.password_hash && bcrypt.compareSync(password, row.password_hash);
     if (!ok) { noteAttempt(key); return res.status(401).json({ error: "That User ID and password don't match." }); }
 
     attempts.delete(key);
     const sid = randomUUID();
-    createSession(sid, row.id, new Date(Date.now() + DAYS * 86400_000).toISOString());
-    touchLogin(row.id);
+    await createSession(sid, row.id, new Date(Date.now() + DAYS * 86400_000).toISOString());
+    await touchLogin(row.id);
     issue(res, sid);
-    res.json({ me: getEmployee(row.id) });
-  });
+    res.json({ me: await getEmployee(row.id) });
+  }));
 
-  app.post("/api/auth/logout", (req, res) => {
-    if (req.sessionId) dropSession(req.sessionId);
+  app.post("/api/auth/logout", wrap(async (req, res) => {
+    if (req.sessionId) await dropSession(req.sessionId);
     clear(res);
     res.json({ ok: true });
-  });
+  }));
 
   app.get("/api/auth/me", (req, res) => res.json({ me: req.user || null }));
 
-  app.post("/api/auth/password", requireUser, (req, res) => {
+  app.post("/api/auth/password", requireUser, wrap(async (req, res) => {
     const current = String(req.body?.current || ""), next = String(req.body?.next || "");
     if (next.length < 10) return res.status(400).json({ error: "Use at least 10 characters." });
-    const hash = getPasswordHash(req.user.id);
+    const hash = await getPasswordHash(req.user.id);
     if (hash && !bcrypt.compareSync(current, hash)) return res.status(400).json({ error: "Your current password is wrong." });
-    setPassword(req.user.id, hashPassword(next), 0);
-    dropSessionsFor(req.user.id);                       // sign out other devices
+    await setPassword(req.user.id, hashPassword(next), 0);
+    await dropSessionsFor(req.user.id);                  // sign out other devices
     const sid = randomUUID();
-    createSession(sid, req.user.id, new Date(Date.now() + DAYS * 86400_000).toISOString());
+    await createSession(sid, req.user.id, new Date(Date.now() + DAYS * 86400_000).toISOString());
     issue(res, sid);
     res.json({ ok: true });
-  });
+  }));
 }
