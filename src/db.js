@@ -15,24 +15,36 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-// Connecting (and validating DATABASE_URL) is lazy, triggered by the first
-// real query rather than by importing this module — a few call paths (e.g.
-// scripts/notif-test.js) import src/domain.js, which imports getConfig from
-// here, but never actually call it; those must stay usable with no database
-// configured at all, the same way they were before this file talked to a
-// network service instead of always-available local SQLite.
+// Connecting (and validating connection settings) is lazy, triggered by the
+// first real query rather than by importing this module — a few call paths
+// (e.g. scripts/notif-test.js) import src/domain.js, which imports getConfig
+// from here, but never actually call it; those must stay usable with no
+// database configured at all, the same way they were before this file talked
+// to a network service instead of always-available local SQLite.
 let pool = null;
 let schemaReady = null;
 
-function getPool() {
-  if (!pool) {
-    const DATABASE_URL = process.env.DATABASE_URL;
-    if (!DATABASE_URL) {
-      console.error("\n  DATABASE_URL is not set. See .env.example.\n");
-      process.exit(1);
-    }
-    pool = mysql.createPool({ uri: DATABASE_URL, waitForConnections: true, connectionLimit: 10 });
+/** Two supported conventions: a single DATABASE_URL (GoDaddy/most hosts), or
+ *  discrete DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD (some platforms —
+ *  e.g. airoapp.ai — auto-inject these instead of a URL when a managed
+ *  database is attached, with no way to see/construct a URL from them). */
+function connectionConfig() {
+  if (process.env.DATABASE_URL) return { uri: process.env.DATABASE_URL };
+  if (process.env.DB_HOST) {
+    return {
+      host: process.env.DB_HOST,
+      port: Number(process.env.DB_PORT || 3306),
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME
+    };
   }
+  console.error("\n  No database configured — set DATABASE_URL, or DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD. See .env.example.\n");
+  process.exit(1);
+}
+
+function getPool() {
+  if (!pool) pool = mysql.createPool({ ...connectionConfig(), waitForConnections: true, connectionLimit: 10 });
   return pool;
 }
 
@@ -44,7 +56,7 @@ function getPool() {
 // statements through a single placeholder.
 async function applySchema() {
   const sql = fs.readFileSync(path.join(HERE, "schema.sql"), "utf8");
-  const conn = await mysql.createConnection({ uri: process.env.DATABASE_URL, multipleStatements: true });
+  const conn = await mysql.createConnection({ ...connectionConfig(), multipleStatements: true });
   try { await conn.query(sql); }
   finally { await conn.end(); }
 }
