@@ -179,7 +179,9 @@ const DEFAULT_CONFIG = {
   workingDays: [1, 2, 3, 4, 5],
   defaultDueDays: 7,
   progressSteps: [0, 10, 25, 50, 75, 90, 100],
-  notify: { assigned: true, priority: true, dueSoon: true, overdue: true, blocked: true, comment: true, completed: false, reassigned: true }
+  notify: { assigned: true, priority: true, dueSoon: true, overdue: true, blocked: true, comment: true, completed: false, reassigned: true },
+  boards: [],
+  hiddenNav: []
 };
 const PROGRESS_STEPS = [0, 10, 25, 50, 75, 90, 100];
 
@@ -191,6 +193,16 @@ const BREAK_TYPES = [
   { id: "LONG", label: "Long Break", allottedSec: 30 * 60 }
 ];
 const breakType = id => BREAK_TYPES.find(t => t.id === id) || null;
+
+/** Fixed Task Board categories, mirrored on the server (src/domain.js) —
+ *  deliberately not config-driven, same convention as BREAK_TYPES. Distinct
+ *  on purpose from the existing free-text `category` tag used elsewhere. */
+const BOARD_CATEGORIES = [
+  { id: "project", label: "Project" },
+  { id: "to_do", label: "To Do" },
+  { id: "on_hold", label: "On Hold" }
+];
+const boardCategoryLabel = id => (BOARD_CATEGORIES.find(c => c.id === id) || {}).label || "To Do";
 
 /** [key, label] pairs shared by the global default toggles (Settings) and
  *  each person's own override toggles (Account) — one list, not two. */
@@ -214,6 +226,7 @@ const S = {
   sort: store.get("sort", { key: "due", dir: 1 }),
   selection: new Set(),
   boardFilter: { assignee: "", project: "" },
+  taskBoardFilter: store.get("taskBoardFilter", { category: "" }),
   teamFilters: store.get("teamFilters", { priority: "", status: "" }),
   teamSort: store.get("teamSort", { key: "name", dir: 1 }),
   ovFilters: store.get("ovFilters", { priority: "", status: "" }),

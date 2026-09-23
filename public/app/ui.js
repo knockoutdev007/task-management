@@ -127,6 +127,7 @@ const VIEWS = {
   myday:     { label: "My Day",         icon: "sunrise",  roles: ["manager", "employee"] },
   working:   { label: "Currently on",   icon: "users",    roles: ["manager"] },
   attention: { label: "Requires attention", icon: "alert", roles: ["manager"] },
+  managerboard: { label: "Managers Board", icon: "board", roles: ["manager"] },
   board:     { label: "Board",          icon: "board",    roles: ["manager", "employee"] },
   tasks:     { label: "All tasks",      icon: "list",     roles: ["manager", "employee"] },
   team:      { label: "Team",           icon: "users",    roles: ["manager"] },
@@ -140,24 +141,45 @@ const VIEWS = {
 };
 const NAV_GROUPS = [
   { h: "Overview", items: ["cc", "myday", "working", "attention"] },
+  { h: "Manager",  items: ["managerboard"] },
   { h: "Work",     items: ["board", "tasks", "blockers", "projects"] },
   { h: "Reporting",items: ["daily", "dayboard", "update", "analytics"] },
   { h: "Admin",    items: ["team", "settings"] }
 ];
+/** Manager-only nav items a manager may hide for everyone from Settings
+ *  (public/app/views-report.js "Manager nav visibility"). Anything shared
+ *  with employees is never offered here. */
+const HIDEABLE_NAV = Object.keys(VIEWS).filter(k => VIEWS[k].roles.length === 1 && VIEWS[k].roles[0] === "manager");
+/** Overview is the fallback landing page itself (hiding it must never create
+ *  a bounce loop) and Settings must always stay reachable so a manager can
+ *  undo a hide — for these two, the toggle only removes the sidebar button.
+ *  Every other hideable item disappears everywhere: its own nav button, any
+ *  "See all"/"Detail" link elsewhere that points at it, and direct navigation
+ *  bounces away instead of rendering it. */
+const NAV_HIDE_SOFT = new Set(["cc", "settings"]);
+const isNavHidden = v => (cfg().hiddenNav || []).includes(v) && !NAV_HIDE_SOFT.has(v);
+/** Manager-created extra boards (Settings "Manager boards") — same content
+ *  as Managers Board, just their own name and nav entry. `id` doubles as the
+ *  S.view value; go(board.id) works for free via the generic data-view handler. */
+const extraBoard = id => (cfg().boards || []).find(b => b.id === id);
 function paintNav() {
   const role = S.me ? S.me.role : "employee";
   const k = S.me ? teamKPIs(visibleTasks()) : null;
   const counts = { attention: k ? k.attention : 0, blockers: k ? k.blocked : 0, tasks: k ? k.active : 0 };
+  const hidden = new Set(cfg().hiddenNav || []);
+  const boards = role === "manager" ? (cfg().boards || []) : [];
   $("#nav").innerHTML = NAV_GROUPS.map(g => {
-    const items = g.items.filter(v => VIEWS[v].roles.includes(role));
-    if (!items.length) return "";
+    const items = g.items.filter(v => VIEWS[v].roles.includes(role) && !hidden.has(v));
+    const extra = g.h === "Manager" ? boards : [];
+    if (!items.length && !extra.length) return "";
+    const boardBtns = extra.map(b => `<button class="nav-i" data-view="${esc(b.id)}" ${S.view === b.id ? 'aria-current="page"' : ""}>${icon("board")}<span>${esc(b.name)}</span></button>`).join("");
     return `<div class="nav-h">${esc(g.h)}</div>` + items.map(v => {
       const c = counts[v];
       return `<button class="nav-i" data-view="${v}" ${S.view === v ? 'aria-current="page"' : ""}>
         ${icon(VIEWS[v].icon)}<span>${esc(VIEWS[v].label)}</span>
         ${c ? `<span class="cnt ${v === "attention" || v === "blockers" ? "hot" : ""}">${c}</span>` : ""}
       </button>`;
-    }).join("");
+    }).join("") + boardBtns;
   }).join("");
 }
 function paintWho() {
@@ -201,18 +223,21 @@ function paint() {
   if (!S.ready) { v.innerHTML = `<div class="empty" style="padding:80px 16px"><strong>Loading…</strong>One moment.</div>`; return; }
   if (!S.me) { v.innerHTML = loginScreen(); return; }
   const role = S.me.role;
-  if (!VIEWS[S.view] || !VIEWS[S.view].roles.includes(role)) S.view = role === "manager" ? "cc" : "myday";
+  const onExtraBoard = role === "manager" && extraBoard(S.view);
+  const blocked = role === "manager" && isNavHidden(S.view);
+  if (!onExtraBoard && (blocked || !VIEWS[S.view] || !VIEWS[S.view].roles.includes(role))) S.view = (role === "manager" && !isNavHidden("cc")) ? "cc" : "myday";
 
   const banner = S.offline
     ? `<div class="banner">${icon("alert")}<span><strong>Not connected.</strong> Changes you make now won’t be saved until the connection comes back.</span></div>`
     : S.me.mustChangePassword
     ? `<div class="banner">${icon("alert")}<span>You’re still on the temporary password you were given.</span><button class="btn sm" data-account style="margin-left:auto">Change it now</button></div>`
     : "";
-  const body = ({
+  const body = (onExtraBoard ? () => viewTaskBoard(onExtraBoard.name) : ({
     cc: viewControlCenter, myday: viewMyDay, working: viewWorking, attention: viewAttention,
-    board: viewBoard, tasks: viewTasks, team: viewTeam, blockers: viewBlockers,
+    board: viewBoard, managerboard: () => viewTaskBoard("Managers Board"),
+    tasks: viewTasks, team: viewTeam, blockers: viewBlockers,
     projects: viewProjects, daily: viewDaily, dayboard: viewDayBoard, update: viewUpdate, analytics: viewAnalytics, settings: viewSettings
-  }[S.view] || viewControlCenter)();
+  }[S.view] || viewControlCenter))();
   v.innerHTML = banner + body;
 }
 

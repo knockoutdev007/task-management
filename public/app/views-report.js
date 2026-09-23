@@ -234,6 +234,23 @@ function viewSettings() {
           </div>`).join("")}
           <div class="hlp">“done” statuses stop overdue and staleness checks. “blocked” marks work as waiting on someone.</div>
         </div></section>
+
+      <section class="panel"><div class="panel-h"><h2>Manager boards</h2>
+        <div class="sp"><button class="btn sm" data-addboard>${icon("plus")}Board</button></div></div>
+        <div class="panel-b" style="display:grid;gap:6px">
+          ${(c.boards || []).map(b => `<div style="display:flex;gap:7px;align-items:center">
+            <span class="tag" style="flex:1">${esc(b.name)}</span>
+            <button class="btn sm dgr" data-delboard="${esc(b.id)}" title="Remove">${icon("x")}</button>
+          </div>`).join("") || `<span style="font-size:11.5px;color:var(--ink-4)">No extra boards yet.</span>`}
+          <div class="hlp">Each one is the same Not Done/Done board as “Managers Board” — just its own name and nav entry, under Manager.</div>
+        </div></section>
+
+      <section class="panel"><div class="panel-h"><h2>Manager nav visibility</h2></div>
+        <div class="panel-b" style="display:grid;gap:5px">
+          ${HIDEABLE_NAV.map(k => `<label style="display:flex;gap:8px;align-items:center;font-size:12.5px">
+              <input type="checkbox" data-navhide="${k}" ${(c.hiddenNav || []).includes(k) ? "" : "checked"}>${esc(VIEWS[k].label)}</label>`).join("")}
+          <div class="hlp">Unchecking an item hides it from every manager's sidebar. Re-check it here to bring it back.</div>
+        </div></section>
     </div>
 
     <div class="stack">

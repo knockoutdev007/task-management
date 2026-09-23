@@ -71,7 +71,9 @@ async function initData() {
   if (r.ok) {
     absorb(r.data);
     S.connected = true;
-    if (!VIEWS[S.view] || !VIEWS[S.view].roles.includes(S.me.role)) S.view = S.me.role === "manager" ? "cc" : "myday";
+    const onExtraBoard = S.me.role === "manager" && extraBoard(S.view);
+    const blocked = S.me.role === "manager" && isNavHidden(S.view);
+    if (!onExtraBoard && (blocked || !VIEWS[S.view] || !VIEWS[S.view].roles.includes(S.me.role))) S.view = (S.me.role === "manager" && !isNavHidden("cc")) ? "cc" : "myday";
     openStream();
   }
   render();
@@ -156,7 +158,8 @@ const FIELD_LABELS = {
   title: "Title", description: "Description", assigneeId: "Assignee", priority: "Priority", status: "Status",
   progress: "Progress", dueDate: "Due date", startDate: "Start date", expectedCompletion: "Expected completion",
   estimatedHours: "Estimated effort", actualHours: "Actual effort", projectId: "Project", category: "Category",
-  departmentId: "Department", teamId: "Team", tags: "Tags"
+  departmentId: "Department", teamId: "Team", tags: "Tags",
+  boardCategory: "Board category", assignedDate: "Date assigned"
 };
 function diffEntries(oldT, newT) {
   const out = [];
@@ -404,6 +407,8 @@ function canComplete(t) {
   return isManager() || t.assigneeId === meId();
 }
 const canAdmin = () => isManager();
+// TODO: restrict to Managers — flip this to `return isManager();` (server mirror: src/domain.js canManageTaskBoard)
+function canManageTaskBoard() { return !!S.me; }
 
 /** A provisional id for the draft form. The server mints the real one on save,
  *  so two people creating at the same moment can never collide. */

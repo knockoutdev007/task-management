@@ -57,8 +57,28 @@ function getPool() {
 async function applySchema() {
   const sql = fs.readFileSync(path.join(HERE, "schema.sql"), "utf8");
   const conn = await mysql.createConnection({ ...connectionConfig(), multipleStatements: true });
-  try { await conn.query(sql); }
-  finally { await conn.end(); }
+  try {
+    await conn.query(sql);
+    await migrateTaskBoardColumns(conn);
+  } finally { await conn.end(); }
+}
+
+/** Older databases predate the Task Board columns; CREATE TABLE IF NOT EXISTS
+ *  above is a no-op against an existing `tasks` table, so add them here if
+ *  missing (MySQL supports ADD COLUMN directly — no SQLite-style table-rebuild
+ *  needed, see the pre-migration email->username commit for that older shape).
+ *  Backfills assigned_date so the assignment timer never has to special-case
+ *  a null value on a task that predates this feature. */
+async function migrateTaskBoardColumns(conn) {
+  const [cols] = await conn.query(
+    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tasks'"
+  );
+  const names = new Set(cols.map(c => c.COLUMN_NAME));
+  if (!names.has("board_category")) await conn.query("ALTER TABLE tasks ADD COLUMN board_category VARCHAR(16) NOT NULL DEFAULT 'to_do'");
+  if (!names.has("assigned_date"))  await conn.query("ALTER TABLE tasks ADD COLUMN assigned_date VARCHAR(32)");
+  if (!names.has("paused_at"))      await conn.query("ALTER TABLE tasks ADD COLUMN paused_at VARCHAR(32)");
+  if (!names.has("paused_ms_total")) await conn.query("ALTER TABLE tasks ADD COLUMN paused_ms_total BIGINT NOT NULL DEFAULT 0");
+  await conn.query("UPDATE tasks SET assigned_date = SUBSTRING(created_at, 1, 10) WHERE assigned_date IS NULL");
 }
 
 /** Every exported function funnels through this — ensures the pool exists and
@@ -108,7 +128,9 @@ export const DEFAULT_CONFIG = {
   workingDays: [1, 2, 3, 4, 5],
   defaultDueDays: 7,
   progressSteps: [0, 10, 25, 50, 75, 90, 100],
-  notify: { assigned: true, priority: true, dueSoon: true, overdue: true, blocked: true, comment: true, completed: false, reassigned: true, dependency: true, attachment: true }
+  notify: { assigned: true, priority: true, dueSoon: true, overdue: true, blocked: true, comment: true, completed: false, reassigned: true, dependency: true, attachment: true },
+  boards: [],       // manager-created extra Task-Board-style nav entries: [{ id, name }]
+  hiddenNav: []     // manager-only nav view keys a manager has hidden from everyone's sidebar
 };
 
 export async function getConfig() {
@@ -260,6 +282,8 @@ const taskOut = (r, comments, activity, attachments) => r && ({
   completedAt: r.completed_at, createdAt: r.created_at, updatedAt: r.updated_at,
   estimatedHours: r.estimated_hours, actualHours: r.actual_hours,
   reopenCount: r.reopen_count,
+  boardCategory: r.board_category, assignedDate: r.assigned_date,
+  pausedAt: r.paused_at, pausedMsTotal: r.paused_ms_total,
   tags: J(r.tags, []), blocker: J(r.blocker, null),
   dependencies: J(r.dependencies, []), links: J(r.links, []),
   comments: comments || [], activity: activity || [], attachments: attachments || []
@@ -303,9 +327,9 @@ export async function upsertTask(t) {
   await exec(`
     INSERT INTO tasks (id, title, description, assignee_id, created_by_id, department_id, team_id,
       project_id, category, priority, status, progress, start_date, due_date, expected_completion,
-      completed_at, estimated_hours, actual_hours, reopen_count, tags, blocker, dependencies, links,
-      created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      completed_at, estimated_hours, actual_hours, reopen_count, board_category, assigned_date,
+      paused_at, paused_ms_total, tags, blocker, dependencies, links, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       title = VALUES(title), description = VALUES(description), assignee_id = VALUES(assignee_id),
       department_id = VALUES(department_id), team_id = VALUES(team_id), project_id = VALUES(project_id),
@@ -313,7 +337,9 @@ export async function upsertTask(t) {
       progress = VALUES(progress), start_date = VALUES(start_date), due_date = VALUES(due_date),
       expected_completion = VALUES(expected_completion), completed_at = VALUES(completed_at),
       estimated_hours = VALUES(estimated_hours), actual_hours = VALUES(actual_hours),
-      reopen_count = VALUES(reopen_count), tags = VALUES(tags), blocker = VALUES(blocker),
+      reopen_count = VALUES(reopen_count), board_category = VALUES(board_category),
+      assigned_date = VALUES(assigned_date), paused_at = VALUES(paused_at),
+      paused_ms_total = VALUES(paused_ms_total), tags = VALUES(tags), blocker = VALUES(blocker),
       dependencies = VALUES(dependencies), links = VALUES(links), updated_at = VALUES(updated_at)
   `, [
     t.id, t.title, t.description || "",
@@ -325,6 +351,11 @@ export async function upsertTask(t) {
     t.expectedCompletion || null, t.completedAt || null,
     num(t.estimatedHours), num(t.actualHours),
     Number(t.reopenCount) || 0,
+    // Defaulted here (not just in the HTTP write path) so every caller — the
+    // seed scripts included, which write tasks straight through this
+    // function — gets a task the assignment timer can read correctly.
+    t.boardCategory || "to_do", (t.assignedDate || t.createdAt || existing?.created_at || ts).slice(0, 10),
+    t.pausedAt || null, Number(t.pausedMsTotal) || 0,
     JSON.stringify(t.tags || []),
     t.blocker ? JSON.stringify(t.blocker) : null,
     JSON.stringify(t.dependencies || []),

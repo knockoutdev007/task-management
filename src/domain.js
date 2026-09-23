@@ -40,6 +40,45 @@ export function canCompleteTask(user, stored) {
 /** Fields only a manager may set. Employees keep the stored value. */
 export const MANAGER_ONLY_FIELDS = ["assigneeId", "dueDate", "departmentId", "teamId"];
 
+/* ------------------------------------------------------------- task board */
+
+/** Fixed board categories — deliberately not config-driven, unlike the
+ *  existing free-text `category` tag (same convention as BREAK_TYPES above).
+ *  Distinct on purpose from `category`: that field is a Settings-editable
+ *  subject tag used app-wide; this is the Task Board's own filter. */
+export const BOARD_CATEGORIES = [
+  { id: "project", label: "Project" },
+  { id: "to_do", label: "To Do" },
+  { id: "on_hold", label: "On Hold" }
+];
+
+/** Who may create/edit tasks on the Task Board. Not `canEditTask` — that
+ *  already enforces real assignee/manager rules for the rest of the app, so
+ *  reusing it here would be wrong. This is a separate, temporary rule.
+ *  TODO: restrict to Managers — flip the body to `return isManager(user);`. */
+export function canManageTaskBoard(user) { return !!user; }
+
+/** Is the assignment timer running for this task right now? */
+export const isBoardTimerRunning = t => t.status !== "COMPLETED" && t.boardCategory !== "on_hold";
+
+/**
+ * Pure pause/resume transition: whenever "is this timer running" flips, stash
+ * or accumulate the paused time. No-op if it didn't flip. Covers all four
+ * brief scenarios (pause-on-done, pause-on-hold, resume-from-hold,
+ * reopen-from-done) with one rule — display copy is what tells them apart,
+ * not this transition. Duplicated (not shared) in public/app/taskTimer.js
+ * for client-side optimistic UI; the server's result here is authoritative.
+ */
+export function nextBoardPauseState({ wasRunning, isRunning, pausedAt, pausedMsTotal }, nowISO) {
+  pausedMsTotal = Number(pausedMsTotal) || 0;
+  if (wasRunning === isRunning) return { pausedAt: pausedAt || null, pausedMsTotal };
+  if (isRunning) {                                          // resuming
+    const ms = pausedAt ? Math.max(0, new Date(nowISO) - new Date(pausedAt)) : 0;
+    return { pausedAt: null, pausedMsTotal: pausedMsTotal + ms };
+  }
+  return { pausedAt: pausedAt || nowISO, pausedMsTotal };     // pausing (done or on_hold)
+}
+
 /**
  * Fold an incoming task onto the stored one, dropping anything this user is
  * not allowed to change. Returns the task to persist plus a list of fields
@@ -102,6 +141,12 @@ export async function validateTask(t) {
   for (const f of ["estimatedHours", "actualHours"]) {
     if (t[f] != null && t[f] !== "" && (isNaN(Number(t[f])) || Number(t[f]) < 0)) errs[f] = "Effort cannot be negative.";
   }
+
+  if (!BOARD_CATEGORIES.some(c => c.id === t.boardCategory)) errs.boardCategory = "Unknown category.";
+  const ad = d(t.assignedDate);
+  if (!ad) errs.assignedDate = "Set the date this was assigned.";
+  else if (ad > new Date()) errs.assignedDate = "Assigned date can't be in the future.";
+
   return errs;
 }
 
@@ -112,7 +157,8 @@ export const FIELD_LABELS = {
   status: "Status", progress: "Progress", dueDate: "Due date", startDate: "Start date",
   expectedCompletion: "Expected completion", estimatedHours: "Estimated effort",
   actualHours: "Actual effort", projectId: "Project", category: "Category",
-  departmentId: "Department", teamId: "Team", tags: "Tags"
+  departmentId: "Department", teamId: "Team", tags: "Tags",
+  boardCategory: "Board category", assignedDate: "Date assigned"
 };
 
 const entry = (user, kind, field, from, to, note) => ({

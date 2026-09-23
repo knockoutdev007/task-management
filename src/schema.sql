@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   estimated_hours     DOUBLE,
   actual_hours        DOUBLE,
   reopen_count        INT NOT NULL DEFAULT 0,
+  board_category      VARCHAR(16) NOT NULL DEFAULT 'to_do',  -- Task Board's own filter: project | to_do | on_hold — unrelated to `category` above
+  assigned_date       VARCHAR(32),     -- date the assignment timer starts counting from (Task Board)
+  paused_at           VARCHAR(32),     -- set while the Task Board timer is paused (done or on_hold); null while running
+  paused_ms_total     BIGINT NOT NULL DEFAULT 0,  -- accumulated paused time, so the timer survives repeated pause/resume
   tags                TEXT NOT NULL,   -- JSON array
   blocker             TEXT,            -- JSON object or null
   dependencies        TEXT NOT NULL,   -- JSON array

@@ -8,7 +8,8 @@ import { randomUUID } from "node:crypto";
 import * as store from "../db.js";
 import {
   canEditTask, canCompleteTask, applyFieldPermissions, validateTask,
-  diffActivity, noteEntry, isManager, notificationRecipients, mentionedEmployeeIds
+  diffActivity, noteEntry, isManager, notificationRecipients, mentionedEmployeeIds,
+  canManageTaskBoard, isBoardTimerRunning, nextBoardPauseState
 } from "../domain.js";
 import { wrap } from "../wrap.js";
 
@@ -55,6 +56,13 @@ async function writeTask(user, id, incoming, extraNotes) {
 
   const { task: merged, denied } = applyFieldPermissions(user, { ...incoming, id }, stored);
 
+  // Task Board fields: only the Task Board UI ever sends these, so gate them
+  // separately from the rest of a task write rather than touching canEditTask.
+  const touchesBoard = ["boardCategory", "assignedDate"].some(
+    f => incoming[f] !== undefined && String(incoming[f]) !== String(stored ? stored[f] : undefined)
+  );
+  if (touchesBoard && !canManageTaskBoard(user)) return { status: 403, body: { error: "You can't change Task Board fields." } };
+
   // Fill in what the assignee implies, so department/team never drift.
   if (merged.assigneeId) {
     const e = await store.getEmployee(merged.assigneeId);
@@ -68,6 +76,23 @@ async function writeTask(user, id, incoming, extraNotes) {
   }
   if (!merged.createdAt) merged.createdAt = new Date().toISOString();
   merged.updatedAt = new Date().toISOString();
+
+  // Defaults so every task (not just ones created via the Task Board) is
+  // always valid, and so the assignment timer's pause bookkeeping below has
+  // real values to work from.
+  if (!merged.boardCategory) merged.boardCategory = (stored && stored.boardCategory) || "to_do";
+  if (!merged.assignedDate) merged.assignedDate = (stored && stored.assignedDate) || merged.createdAt.slice(0, 10);
+
+  // Assignment timer: the server derives pausedAt/pausedMsTotal itself —
+  // never trust the client's copy, same posture as completedAt/progress above.
+  const wasRunning = stored ? isBoardTimerRunning(stored) : true;
+  const isRunning = isBoardTimerRunning(merged);
+  const pauseState = nextBoardPauseState(
+    { wasRunning, isRunning, pausedAt: stored ? stored.pausedAt : null, pausedMsTotal: stored ? stored.pausedMsTotal : 0 },
+    merged.updatedAt
+  );
+  merged.pausedAt = pauseState.pausedAt;
+  merged.pausedMsTotal = pauseState.pausedMsTotal;
 
   const errs = await validateTask(merged);
   if (Object.keys(errs).length) return { status: 422, body: { error: "That task isn't valid.", fields: errs } };
