@@ -18,12 +18,44 @@ function setFilterFromKpi(spec) {
 }
 
 document.addEventListener("click", async ev => {
-  const el = ev.target.closest("[data-newtask],[data-view],[data-go],[data-kpi],[data-open],[data-close],[data-tab],[data-account],[data-savepw],[data-logout],[data-copytemp],[data-resetpw],[data-emp],[data-proj],[data-projtasks],[data-newfor],[data-newemp],[data-editemp],[data-newproj],[data-delproj],[data-edittask],[data-savetask],[data-deltask],[data-complete],[data-reopen],[data-blockit],[data-saveblocker],[data-unblock],[data-quickprog],[data-saveprogress],[data-pg],[data-setprog],[data-addcmt],[data-addlink],[data-savelink],[data-dellink],[data-delatt],[data-adddep],[data-savedep],[data-toggledep],[data-deldep],[data-saveemp],[data-saveproj],[data-bulk],[data-savebulk],[data-quick],[data-pick],[data-startbreak],[data-export],[data-week],[data-clearfilters],[data-clearteamfilters],[data-clearovfilters],[data-blockfilter],[data-sort],[data-teamsort],[data-copysummary],[data-dayboard],[data-addplan],[data-toggleplan],[data-delplan],[data-prefillplan],[data-adddept],[data-deldept],[data-addteam],[data-delteam],[data-addstatus],[data-delstatus],[data-wd],[data-dayteam]");
+  const el = ev.target.closest("[data-newtask],[data-newtboard],[data-savetboard],[data-tbtoggle],[data-view],[data-go],[data-kpi],[data-open],[data-close],[data-tab],[data-account],[data-savepw],[data-logout],[data-copytemp],[data-resetpw],[data-emp],[data-proj],[data-projtasks],[data-newfor],[data-newemp],[data-editemp],[data-newproj],[data-delproj],[data-edittask],[data-savetask],[data-deltask],[data-complete],[data-reopen],[data-blockit],[data-saveblocker],[data-unblock],[data-quickprog],[data-saveprogress],[data-pg],[data-setprog],[data-addcmt],[data-addlink],[data-savelink],[data-dellink],[data-delatt],[data-adddep],[data-savedep],[data-toggledep],[data-deldep],[data-saveemp],[data-saveproj],[data-bulk],[data-savebulk],[data-quick],[data-pick],[data-startbreak],[data-export],[data-week],[data-clearfilters],[data-clearteamfilters],[data-clearovfilters],[data-blockfilter],[data-sort],[data-teamsort],[data-copysummary],[data-dayboard],[data-addplan],[data-toggleplan],[data-delplan],[data-prefillplan],[data-adddept],[data-deldept],[data-addteam],[data-delteam],[data-addstatus],[data-delstatus],[data-wd],[data-dayteam],[data-addboard],[data-delboard]");
   if (!el) return;
   const d = el.dataset;
 
   /* ---- navigation ---- */
   if ("newtask" in d) return openLayer(taskForm(null, isManager() ? "" : meId()));
+  if ("newtboard" in d) return openLayer(taskBoardModal());
+  if ("savetboard" in d) {
+    const err = m => { $("#tb-err").innerHTML = `<div class="hlp err">${esc(m)}</div>`; };
+    const title = $("#tb-title").value.trim().slice(0, 120);
+    const category = $("#tb-category").value;
+    const assigneeId = $("#tb-assignee").value;
+    const assignedDate = $("#tb-date").value;
+    if (!title) return err("Give the task a name.");
+    if (!assigneeId) return err("Assign this to someone.");
+    if (!assignedDate) return err("Set the date this was assigned.");
+    if (assignedDate > todayISO()) return err("Assigned date can't be in the future.");
+    const t = {
+      id: nextTaskId(), title, description: "", assigneeId, createdById: meId(),
+      departmentId: "", teamId: "", projectId: "", category: "",
+      priority: "MEDIUM", status: "NOT_STARTED", progress: 0,
+      createdAt: nowISO(), startDate: todayISO(), dueDate: "", expectedCompletion: "", completedAt: null, updatedAt: nowISO(),
+      estimatedHours: "", actualHours: "", tags: [], comments: [], activity: [], dependencies: [], links: [], blocker: null, reopenCount: 0,
+      boardCategory: category, assignedDate, pausedAt: category === "on_hold" ? nowISO() : null, pausedMsTotal: 0
+    };
+    await saveTask(t);
+    closeLayer(); toast("Task created");
+    return;
+  }
+  if (d.tbtoggle) {
+    const t = S.tasks.find(x => x.id === d.tbtoggle); if (!t) return;
+    if (!canManageTaskBoard()) return toast("You can't change this task.", true);
+    const patch = t.status === "COMPLETED"
+      ? { status: "IN_PROGRESS", completedAt: null, reopenCount: (t.reopenCount || 0) + 1, progress: t.progress === 100 ? 90 : t.progress }
+      : { status: "COMPLETED", progress: 100, completedAt: nowISO() };
+    await patchTask(d.tbtoggle, patch);
+    return;
+  }
   if (d.view) return go(d.view);
   if (d.go) return go(d.go);
   if ("kpi" in d) { if (d.kpi) setFilterFromKpi(d.kpi); return; }
@@ -345,6 +377,17 @@ document.addEventListener("click", async ev => {
     cfg().workingDays = w.includes(n) ? w.filter(x => x !== n) : w.concat([n]).sort();
     return saveConfig();
   }
+  if ("addboard" in d) {
+    const n = prompt("Board name:"); if (!n) return;
+    cfg().boards = (cfg().boards || []).concat([{ id: uid("xb"), name: n.trim().slice(0, 60) }]);
+    return saveConfig();
+  }
+  if (d.delboard) {
+    if (!confirm("Remove this board? Its nav entry disappears; the tasks themselves aren't touched.")) return;
+    cfg().boards = (cfg().boards || []).filter(b => b.id !== d.delboard);
+    if (S.view === d.delboard) go(isManager() ? "cc" : "myday");
+    return saveConfig();
+  }
 });
 
 /* ---- topbar ---- */
@@ -381,6 +424,11 @@ document.addEventListener("change", ev => {
   const F = S.filters;
   const map = { "f-assignee": "assignee", "f-dept": "dept", "f-team": "team", "f-project": "project", "f-priority": "priority", "f-status": "status", "f-due": "due", "f-flag": "flag", "f-completed": "completed", "f-minp": "minProgress", "f-maxp": "maxProgress" };
   if (map[id]) { F[map[id]] = t.value; return persistState("filters"); }
+  if (id === "f-tb-category") { S.taskBoardFilter.category = t.value; return persistState("taskBoardFilter"); }
+  if (t.dataset.tbcat) {
+    if (!canManageTaskBoard()) return render();
+    return patchTask(t.dataset.tbcat, { boardCategory: t.value });
+  }
   const teamMap = { "f-team-priority": "priority", "f-team-status": "status" };
   if (teamMap[id]) { S.teamFilters[teamMap[id]] = t.value; return persistState("teamFilters"); }
   const ovMap = { "f-ov-priority": "priority", "f-ov-status": "status" };
@@ -403,6 +451,12 @@ document.addEventListener("change", ev => {
   if ("defdue" in ds) { cfg().defaultDueDays = Math.max(1, Number(t.value) || 7); return saveConfig(); }
   if ("cats" in ds) { cfg().categories = t.value.split(",").map(s => s.trim()).filter(Boolean); return saveConfig(); }
   if (ds.notify) { cfg().notify = cfg().notify || {}; cfg().notify[ds.notify] = t.checked; return saveConfig(); }
+  if (ds.navhide) {
+    const hidden = new Set(cfg().hiddenNav || []);
+    t.checked ? hidden.delete(ds.navhide) : hidden.add(ds.navhide);
+    cfg().hiddenNav = Array.from(hidden);
+    return saveConfig();
+  }
   if (ds.mynotify) return saveMyNotifyPrefs({ [ds.mynotify]: t.checked });
   if ("desktopnotifs" in ds) {
     if (t.checked) { enableDesktopNotifs().then(ok => { t.checked = ok; }); }
@@ -539,6 +593,37 @@ document.addEventListener("drop", async e => {
   await patchTask(id, patch);
 });
 
+/* ---- drag and drop on the task board (separate from the board above: own
+   classes/attributes so the two never cross-trigger each other) ---- */
+let tbDragId = null;
+document.addEventListener("dragstart", e => {
+  const c = e.target.closest("[data-tbcard]"); if (!c) return;
+  tbDragId = c.dataset.tbcard; c.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+  try { e.dataTransfer.setData("text/plain", tbDragId); } catch {}
+});
+document.addEventListener("dragend", e => { const c = e.target.closest("[data-tbcard]"); if (c) c.classList.remove("dragging"); tbDragId = null; $$(".tbcol.over").forEach(x => x.classList.remove("over")); });
+document.addEventListener("dragover", e => {
+  const col = e.target.closest("[data-tbcol]"); if (!col || !tbDragId) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = "move";
+  $$(".tbcol.over").forEach(x => { if (x !== col) x.classList.remove("over"); });
+  col.classList.add("over");
+});
+document.addEventListener("drop", async e => {
+  const col = e.target.closest("[data-tbcol]"); if (!col || !tbDragId) return;
+  e.preventDefault();
+  const wantDone = col.dataset.tbcol === "done", id = tbDragId; tbDragId = null;
+  $$(".tbcol.over").forEach(x => x.classList.remove("over"));
+  const t = S.tasks.find(x => x.id === id); if (!t) return;
+  const isDone = t.status === "COMPLETED";
+  if (isDone === wantDone) return;
+  if (!canManageTaskBoard()) return toast("You can't move this card.", true);
+  const patch = wantDone
+    ? { status: "COMPLETED", progress: 100, completedAt: nowISO() }
+    : { status: "IN_PROGRESS", completedAt: null, reopenCount: (t.reopenCount || 0) + 1, progress: t.progress === 100 ? 90 : t.progress };
+  await patchTask(id, patch);
+});
+
 document.addEventListener("submit", async ev => {
   if (ev.target.id !== "loginForm") return;
   ev.preventDefault();
@@ -564,4 +649,5 @@ document.addEventListener("submit", async ev => {
   initData();
   setInterval(() => { if (S.ready && S.me && !L().innerHTML) render(); }, 120000);  // keep relative times honest
   setInterval(() => { if (S.me && openBreakFor(meId())) render(); }, 1000);         // tick the running break timer
+  setInterval(() => { if (S.view === "managerboard" || extraBoard(S.view)) render(); }, 60000); // roll the assignment-timer day count over live
 })();

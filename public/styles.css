@@ -501,21 +501,32 @@ table.t tr.grp-row:hover td { background: var(--surface-2); }
 
 /* ---------- kanban ---------- */
 .kb { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(252px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 8px; align-items: start; }
-.kcol { background: var(--surface-sunk); border: 1px solid var(--line-soft); border-radius: var(--r-lg); display: flex; flex-direction: column; max-height: 74vh; }
+.kcol, .tbcol { background: var(--surface-sunk); border: 1px solid var(--line-soft); border-radius: var(--r-lg); display: flex; flex-direction: column; max-height: 74vh; }
 .kcol-h { padding: 9px 11px; display: flex; align-items: center; gap: 7px; border-bottom: 1px solid var(--line-soft); position: sticky; top: 0; background: var(--surface-sunk); border-radius: var(--r-lg) var(--r-lg) 0 0; z-index: 2; }
 .kcol-h .nm { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
 .kcol-h .n { margin-left: auto; font-family: var(--f-mono); font-size: 11px; color: var(--ink-4); }
 .kcol-b { padding: 8px; display: grid; gap: 7px; overflow-y: auto; min-height: 70px; }
-.kcol.over { outline: 2px dashed var(--accent); outline-offset: -3px; }
-.kcard {
+.kcol.over, .tbcol.over { outline: 2px dashed var(--accent); outline-offset: -3px; }
+.kcard, .tbcard {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
   padding: 9px 10px; display: grid; gap: 6px; cursor: grab; box-shadow: var(--shadow-sm);
 }
-.kcard:hover { border-color: var(--accent-line); }
-.kcard.dragging { opacity: .4; }
-.kcard .kt { font-size: 12.2px; font-weight: 600; line-height: 1.32; }
-.kcard .krow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 10.5px; color: var(--ink-3); }
-.kcard .kstripe { height: 2px; border-radius: 2px; margin: -9px -10px 2px; }
+.kcard:hover, .tbcard:hover { border-color: var(--accent-line); }
+.kcard.dragging, .tbcard.dragging { opacity: .4; }
+.kcard .kt, .tbcard .kt { font-size: 12.2px; font-weight: 600; line-height: 1.32; }
+.kcard .krow, .tbcard .krow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 10.5px; color: var(--ink-3); }
+.kcard .kstripe, .tbcard .kstripe { height: 2px; border-radius: 2px; margin: -9px -10px 2px; }
+.tbtimer {
+  margin-left: auto; display: inline-flex; align-items: center; padding: 1px 7px; border-radius: var(--r-sm);
+  font-size: 10.5px; font-weight: 600; white-space: nowrap;
+  background: var(--accent-soft); color: var(--accent-ink); border: 1px solid var(--accent-line);
+}
+.tbtimer.muted { background: var(--surface-sunk); color: var(--ink-4); border-color: var(--line-soft); font-weight: 500; }
+.tbcard select {
+  padding: 3px 8px; font-size: 10.5px; border-radius: var(--r-sm);
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+}
+.tbcard select:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
 
 /* ---------- forms ---------- */
 .field { display: grid; gap: 4px; }

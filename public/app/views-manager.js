@@ -33,7 +33,7 @@ function viewControlCenter() {
       <div class="sub">${greeting()} — ${k.active} active tasks across ${people.length} people. ${k.attention ? `<strong style="color:var(--crit)">${k.attention} need your attention.</strong>` : "Nothing is flagged right now."}</div>
     </div>
     <div class="sp">
-      <button class="btn" data-go="daily">${icon("inbox")}Daily summary</button>
+      ${isNavHidden("daily") ? "" : `<button class="btn" data-go="daily">${icon("inbox")}Daily summary</button>`}
       <button class="btn" data-export="workload">${icon("dl")}Export workload</button>
     </div>
   </div>
@@ -57,7 +57,7 @@ function viewControlCenter() {
         <div class="panel-h">
           <h2>Team workload</h2>
           <span class="hint">${ovActive ? "counts reflect the active filter" : "weighted by priority, remaining effort and deadline — not task count"}</span>
-          <div class="sp"><button class="btn sm" data-go="team">Detail</button></div>
+          <div class="sp">${isNavHidden("team") ? "" : `<button class="btn sm" data-go="team">Detail</button>`}</div>
         </div>
         <div class="tw"><table class="t">
           <thead><tr>
@@ -96,20 +96,20 @@ function viewControlCenter() {
         </div>
       </section>
 
-      <section class="panel">
+      ${isNavHidden("working") ? "" : `<section class="panel">
         <div class="panel-h"><h2>Currently working on</h2><span class="hint">${cwoFilter ? `${cwoPeople.length} match${cwoPeople.length === 1 ? "" : "es"} the filter` : "top-priority open task per person"}</span>
           <div class="sp"><button class="btn sm" data-go="working">See all</button></div></div>
         <div class="panel-b"><div class="cwo">${cwoPeople.slice(0, 6).map(e => workCard(e, 1, cwoFilter)).join("") || emptyState("No one matches this filter", "Try a different priority or status.")}</div></div>
-      </section>
+      </section>`}
     </div>
 
     <div class="stack">
-      <section class="panel">
+      ${isNavHidden("attention") ? "" : `<section class="panel">
         <div class="panel-h"><h2>Requires attention</h2>
           <span class="hint">${attnTasks.length} item${attnTasks.length === 1 ? "" : "s"}</span>
           <div class="sp"><button class="btn sm" data-go="attention">All</button></div></div>
         <div class="att">${attnTasks.slice(0, 7).map(attnItem).join("") || emptyState("Nothing flagged", "No overdue, blocked, stale or off-track work right now.")}</div>
-      </section>
+      </section>`}
 
       <section class="panel">
         <div class="panel-h"><h2>Upcoming deadlines</h2><span class="hint">next 7 days</span></div>

@@ -45,6 +45,29 @@ function linkModal(t) {
       <div class="sp"><button class="btn" data-close>Cancel</button><button class="btn pri" data-savelink="${esc(t.id)}">Add link</button></div></div>
   </div>`;
 }
+/** Minimal Task Board creation form — just the 4 fields the brief asks for,
+ *  not the full taskForm(). Everything else gets sane defaults on save. */
+function taskBoardModal() {
+  return `<div class="modal" role="dialog" aria-modal="true" aria-label="New task">
+    <div class="dh"><h2>New task</h2><div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>
+    <div class="db">
+      <div class="field"><label for="tb-title">Task name</label>
+        <input class="inp" id="tb-title" maxlength="120" placeholder="What needs to get done?"></div>
+      <div class="frow">
+        <div class="field"><label for="tb-category">Category</label>
+          <select class="inp" id="tb-category">${BOARD_CATEGORIES.map(c => `<option value="${esc(c.id)}" ${c.id === "to_do" ? "selected" : ""}>${esc(c.label)}</option>`).join("")}</select></div>
+        <div class="field"><label for="tb-assignee">Assigned to</label>
+          <select class="inp" id="tb-assignee"><option value="">Choose someone</option>
+            ${S.employees.filter(e => e.active !== false).map(e => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join("")}</select></div>
+      </div>
+      <div class="field"><label for="tb-date">Date assigned</label>
+        <input class="inp" type="date" id="tb-date" max="${todayISO()}" value="${todayISO()}"></div>
+      <div id="tb-err"></div>
+    </div>
+    <div class="df"><span></span>
+      <div class="sp"><button class="btn" data-close>Cancel</button><button class="btn pri" data-savetboard>Create task</button></div></div>
+  </div>`;
+}
 function dependencyModal(t) {
   return `<div class="modal" role="dialog" aria-modal="true" aria-label="Add dependency">
     <div class="dh"><h2>Add a dependency</h2><div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>

@@ -189,6 +189,57 @@ function kCard(t) {
 }
 
 /* ==========================================================================
+   VIEW · TASK BOARD (Not Done / Done, category filter, assignment timer)
+   A sibling to the Board view above, not a mode of it — different columns
+   (binary done/not-done vs. every status), a different category concept
+   (boardCategory vs. the free-text `category` tag), and its own drag-and-
+   drop/permission gate (public/app/events.js, canManageTaskBoard).
+
+   Two nav entries render this same function (ui.js's paint() dispatcher):
+   "Task Board" (everyone) and the manager-only "Managers Board", which is
+   the same board/data — a manager already sees every task here, same as
+   on Task Board — just reachable from its own nav item near Overview.
+   `title` is only which heading to print. */
+function viewTaskBoard(title) {
+  const cat = S.taskBoardFilter.category;
+  const ts = visibleTasks().filter(t => t.status !== "CANCELLED" && (!cat || t.boardCategory === cat));
+  const notDone = ts.filter(t => t.status !== "COMPLETED");
+  const done = ts.filter(t => t.status === "COMPLETED");
+  return `
+  <div class="ph"><div><h1>${esc(title || "Task Board")}</h1><div class="sub">${ts.length} task${ts.length === 1 ? "" : "s"} shown.</div></div>
+    <div class="sp"><button class="btn pri" data-newtboard>${icon("plus")}New task</button></div></div>
+  <section class="panel" style="margin-bottom:12px"><div class="fbar" style="border-radius:var(--r-lg)">
+    <label class="lbl">Category</label>
+    <select id="f-tb-category"><option value="">All</option>${BOARD_CATEGORIES.map(c => `<option value="${esc(c.id)}" ${cat === c.id ? "selected" : ""}>${esc(c.label)}</option>`).join("")}</select>
+    <span class="fcount">${ts.length} shown</span>
+  </div></section>
+  <div class="kb">
+    <div class="tbcol" data-tbcol="not_done">
+      <div class="kcol-h"><span class="nm">Not Done</span><span class="n">${notDone.length}</span></div>
+      <div class="kcol-b">${notDone.map(tbCard).join("") || `<div style="font-size:11.5px;color:var(--ink-4);padding:8px;text-align:center">—</div>`}</div>
+    </div>
+    <div class="tbcol" data-tbcol="done">
+      <div class="kcol-h"><span class="nm">Done</span><span class="n">${done.length}</span></div>
+      <div class="kcol-b">${done.map(tbCard).join("") || `<div style="font-size:11.5px;color:var(--ink-4);padding:8px;text-align:center">—</div>`}</div>
+    </div>
+  </div>`;
+}
+function tbCard(t) {
+  const e = emp(t.assigneeId);
+  const info = taskTimerInfo(t);
+  const can = canManageTaskBoard();
+  return `<article class="tbcard" draggable="${can}" data-tbcard="${esc(t.id)}">
+    <div class="kt">${taskLink(t)}</div>
+    <div class="krow"><span class="tag">${esc(boardCategoryLabel(t.boardCategory))}</span>${av(e, "sm")}<span>${esc(e ? e.name.split(" ")[0] : "—")}</span></div>
+    <div class="krow"><span class="tbtimer${info.muted ? " muted" : ""}">${esc(info.text)}</span></div>
+    <div class="krow">
+      <button class="btn sm" data-tbtoggle="${esc(t.id)}" ${can ? "" : "disabled"}>${t.status === "COMPLETED" ? "Reopen" : "Mark Done"}</button>
+      <select data-tbcat="${esc(t.id)}" ${can ? "" : "disabled"}>${BOARD_CATEGORIES.map(c => `<option value="${esc(c.id)}" ${t.boardCategory === c.id ? "selected" : ""}>${esc(c.label)}</option>`).join("")}</select>
+    </div>
+  </article>`;
+}
+
+/* ==========================================================================
    VIEW · ALL TASKS (table)
    ========================================================================== */
 const TABLE_COLS = [
