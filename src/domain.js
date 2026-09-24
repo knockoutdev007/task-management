@@ -49,7 +49,8 @@ export const MANAGER_ONLY_FIELDS = ["assigneeId", "dueDate", "departmentId", "te
 export const BOARD_CATEGORIES = [
   { id: "project", label: "Project" },
   { id: "to_do", label: "To Do" },
-  { id: "on_hold", label: "On Hold" }
+  { id: "on_hold", label: "On Hold" },
+  { id: "rock", label: "Rock" }
 ];
 
 /** Who may create/edit tasks on the Task Board. Not `canEditTask` — that
