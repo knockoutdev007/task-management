@@ -200,7 +200,8 @@ const breakType = id => BREAK_TYPES.find(t => t.id === id) || null;
 const BOARD_CATEGORIES = [
   { id: "project", label: "Project" },
   { id: "to_do", label: "To Do" },
-  { id: "on_hold", label: "On Hold" }
+  { id: "on_hold", label: "On Hold" },
+  { id: "rock", label: "Rock" }
 ];
 const boardCategoryLabel = id => (BOARD_CATEGORIES.find(c => c.id === id) || {}).label || "To Do";
 
