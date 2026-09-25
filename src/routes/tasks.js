@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import * as store from "../db.js";
 import {
   canEditTask, canCompleteTask, applyFieldPermissions, validateTask,
-  diffActivity, noteEntry, isManager, notificationRecipients, mentionedEmployeeIds,
+  diffActivity, noteEntry, isManager, isTeamLead, hasCapability, inManagedScope, notificationRecipients, mentionedEmployeeIds,
   canManageTaskBoard, isBoardTimerRunning, nextBoardPauseState
 } from "../domain.js";
 import { wrap } from "../wrap.js";
@@ -54,7 +54,22 @@ async function writeTask(user, id, incoming, extraNotes) {
   const stored = await store.getTask(id);
   if (!canEditTask(user, stored)) return { status: 403, body: { error: "You can only change your own tasks." } };
 
-  const { task: merged, denied } = applyFieldPermissions(user, { ...incoming, id }, stored);
+  // A team lead granted the "tasks" capability may set assigneeId/dueDate
+  // like a manager, but only within a team they manage — resolved here (not
+  // in applyFieldPermissions, which is pure/no DB access) by looking up
+  // whoever the task would end up assigned to, existing or incoming, and
+  // checking they're on one of the team lead's teams.
+  let teamLeadCanManage = false;
+  if (isTeamLead(user) && !isManager(user) && hasCapability(user, "tasks")) {
+    const candidateId = incoming.assigneeId || (stored ? stored.assigneeId : user.id);
+    if (candidateId === user.id) teamLeadCanManage = true;
+    else if (candidateId) {
+      const target = await store.getEmployee(candidateId);
+      teamLeadCanManage = inManagedScope(user, target);
+    }
+  }
+
+  const { task: merged, denied } = applyFieldPermissions(user, { ...incoming, id }, stored, { teamLeadCanManage });
 
   // Task Board fields: only the Task Board UI ever sends these, so gate them
   // separately from the rest of a task write rather than touching canEditTask.
@@ -66,7 +81,7 @@ async function writeTask(user, id, incoming, extraNotes) {
   // Fill in what the assignee implies, so department/team never drift.
   if (merged.assigneeId) {
     const e = await store.getEmployee(merged.assigneeId);
-    if (e && (isManager(user) || !stored)) { merged.departmentId = e.departmentId; merged.teamId = e.teamId; }
+    if (e && (isManager(user) || !stored || teamLeadCanManage)) { merged.departmentId = e.departmentId; merged.teamId = e.teamId; }
   }
   if (merged.status === "COMPLETED") {
     merged.progress = 100;

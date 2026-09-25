@@ -77,6 +77,11 @@ export const requireUser = (req, res, next) =>
   req.user ? next() : res.status(401).json({ error: "Sign in to continue." });
 export const requireManager = (req, res, next) =>
   req.user && req.user.role === "manager" ? next() : res.status(403).json({ error: "Managers only." });
+/** Team leads get in the door for routes that do their own, finer-grained
+ *  team-scoping inside the handler (e.g. "only within your own team") —
+ *  this just filters out plain employees, same shape as requireManager. */
+export const requireManagerOrTeamLead = (req, res, next) =>
+  req.user && (req.user.role === "manager" || req.user.role === "teamlead") ? next() : res.status(403).json({ error: "Managers only." });
 
 /* --------------------------------------------------------- login attempts */
 // Small in-memory throttle. Enough for an internal tool behind a VPN or SSO

@@ -248,11 +248,51 @@ const TABLE_COLS = [
   ["created", "Created"], ["due", "Due"], ["expected", "Expected"], ["updated", "Updated"],
   ["est", "Est h"], ["act", "Act h"], ["blocker", "Blocker"], ["attention", "Attention"]
 ];
+/** The subset of TABLE_COLS a manager can hide — and, via drag in Settings,
+ *  reorder — on the All Tasks table (cfg().hiddenTaskCols / cfg().taskColOrder).
+ *  The other 6 columns (id, title, assignee, project, priority, status) stay
+ *  fixed at the start of the table, always visible. */
+const HIDEABLE_TASK_COLS = TABLE_COLS.filter(([k]) => ["progress", "created", "due", "expected", "updated", "est", "act", "blocker", "attention"].includes(k));
+const CORE_TASK_COLS = TABLE_COLS.filter(([k]) => !HIDEABLE_TASK_COLS.some(([hk]) => hk === k));
+
+/** cfg().taskColOrder as a full, deduped permutation of HIDEABLE_TASK_COLS's
+ *  ids — keeps the saved order, then appends any id missing from it (e.g. a
+ *  newly added optional column on an older saved config), so this never
+ *  silently drops a column even if the stored order is stale. */
+function normalizedTaskColOrder(saved) {
+  const validIds = HIDEABLE_TASK_COLS.map(([k]) => k);
+  const seen = new Set(), out = [];
+  for (const k of (saved || [])) { if (validIds.includes(k) && !seen.has(k)) { seen.add(k); out.push(k); } }
+  for (const k of validIds) { if (!seen.has(k)) { seen.add(k); out.push(k); } }
+  return out;
+}
+
+/** One optional column's <td> for a task row, keyed by column id so the row
+ *  can follow the same manager-chosen order as the header. */
+function taskOptionalCell(id, t, f, a) {
+  switch (id) {
+    case "progress":  return `<td>${pBar(t)}</td>`;
+    case "created":   return `<td style="font-size:11.5px;color:var(--ink-3);white-space:nowrap">${esc(fmtDate(t.createdAt, { absolute: true }))}</td>`;
+    case "due":       return `<td style="white-space:nowrap;${f.overdue ? "color:var(--crit);font-weight:600" : ""}">${esc(fmtDate(t.dueDate))}</td>`;
+    case "expected":  return `<td style="white-space:nowrap;font-size:11.5px;color:var(--ink-3)">${esc(fmtDate(t.expectedCompletion))}</td>`;
+    case "updated":   return `<td style="white-space:nowrap;font-size:11.5px;${f.stale ? "color:var(--warn);font-weight:600" : "color:var(--ink-3)"}">${esc(fmtAgo(t.updatedAt))}</td>`;
+    case "est":       return `<td class="c mono">${t.estimatedHours || "·"}</td>`;
+    case "act":       return `<td class="c mono">${t.actualHours || "·"}</td>`;
+    case "blocker":   return `<td style="max-width:150px;font-size:11.5px;color:var(--block)">${f.blocked && t.blocker ? esc((t.blocker.reason || "").slice(0, 40)) : "<span style='color:var(--ink-4)'>—</span>"}</td>`;
+    case "attention": return `<td>${a.length ? `<span class="flag ${a[0].sev === 3 ? "od" : "st"}" title="${esc(a.map(x => x.text).join(" · "))}">${a[0].ic} ${a.length}</span>` : "<span style='color:var(--ink-4)'>—</span>"}</td>`;
+    default:          return "";
+  }
+}
+
 function viewTasks() {
   const all = visibleTasks();
   const rows = sortTasks(applyFilters(all));
   const sel = S.selection;
   const teams = allTeams();
+  const hiddenCols = new Set(cfg().hiddenTaskCols || []);
+  const optionalIds = normalizedTaskColOrder(cfg().taskColOrder).filter(k => !hiddenCols.has(k));
+  const optionalCols = optionalIds.map(k => HIDEABLE_TASK_COLS.find(([id]) => id === k));
+  const cols = [...CORE_TASK_COLS, ...optionalCols];
   return `
   <div class="ph"><div><h1>All tasks</h1><div class="sub">${rows.length} of ${all.length} tasks match the current filters.</div></div>
     <div class="sp">
@@ -288,7 +328,7 @@ function viewTasks() {
     <div class="tw scrolly"><table class="t">
       <thead><tr>
         <th style="width:26px"><input type="checkbox" id="selAll" ${rows.length && rows.every(t => sel.has(t.id)) ? "checked" : ""} aria-label="Select all"></th>
-        ${TABLE_COLS.map(([k, l]) => `<th class="${SORTERS[k] ? "sortable" : ""}" ${SORTERS[k] ? `data-sort="${k}"` : ""}>${esc(l)}${S.sort.key === k ? `<span class="caret"> ${S.sort.dir > 0 ? "▲" : "▼"}</span>` : ""}</th>`).join("")}
+        ${cols.map(([k, l]) => `<th class="${SORTERS[k] ? "sortable" : ""}" ${SORTERS[k] ? `data-sort="${k}"` : ""}>${esc(l)}${S.sort.key === k ? `<span class="caret"> ${S.sort.dir > 0 ? "▲" : "▼"}</span>` : ""}</th>`).join("")}
       </tr></thead>
       <tbody>${rows.map(t => {
         const f = flags(t), a = attention(t);
@@ -300,17 +340,9 @@ function viewTasks() {
           <td style="font-size:11.5px">${esc(projName(t.projectId))}</td>
           <td>${pPill(t.priority)}</td>
           <td>${sChip(t.status)}</td>
-          <td>${pBar(t)}</td>
-          <td style="font-size:11.5px;color:var(--ink-3);white-space:nowrap">${esc(fmtDate(t.createdAt, { absolute: true }))}</td>
-          <td style="white-space:nowrap;${f.overdue ? "color:var(--crit);font-weight:600" : ""}">${esc(fmtDate(t.dueDate))}</td>
-          <td style="white-space:nowrap;font-size:11.5px;color:var(--ink-3)">${esc(fmtDate(t.expectedCompletion))}</td>
-          <td style="white-space:nowrap;font-size:11.5px;${f.stale ? "color:var(--warn);font-weight:600" : "color:var(--ink-3)"}">${esc(fmtAgo(t.updatedAt))}</td>
-          <td class="c mono">${t.estimatedHours || "·"}</td>
-          <td class="c mono">${t.actualHours || "·"}</td>
-          <td style="max-width:150px;font-size:11.5px;color:var(--block)">${f.blocked && t.blocker ? esc((t.blocker.reason || "").slice(0, 40)) : "<span style='color:var(--ink-4)'>—</span>"}</td>
-          <td>${a.length ? `<span class="flag ${a[0].sev === 3 ? "od" : "st"}" title="${esc(a.map(x => x.text).join(" · "))}">${a[0].ic} ${a.length}</span>` : "<span style='color:var(--ink-4)'>—</span>"}</td>
+          ${optionalIds.map(id => taskOptionalCell(id, t, f, a)).join("")}
         </tr>`;
-      }).join("") || `<tr><td colspan="16">${emptyState("No tasks match", "Loosen a filter or clear them all.")}</td></tr>`}</tbody>
+      }).join("") || `<tr><td colspan="${cols.length + 1}">${emptyState("No tasks match", "Loosen a filter or clear them all.")}</td></tr>`}</tbody>
     </table></div>
   </section>`;
 }

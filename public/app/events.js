@@ -18,7 +18,7 @@ function setFilterFromKpi(spec) {
 }
 
 document.addEventListener("click", async ev => {
-  const el = ev.target.closest("[data-newtask],[data-newtboard],[data-savetboard],[data-tbtoggle],[data-view],[data-go],[data-kpi],[data-open],[data-close],[data-tab],[data-account],[data-savepw],[data-logout],[data-copytemp],[data-resetpw],[data-emp],[data-proj],[data-projtasks],[data-newfor],[data-newemp],[data-editemp],[data-newproj],[data-delproj],[data-edittask],[data-savetask],[data-deltask],[data-complete],[data-reopen],[data-blockit],[data-saveblocker],[data-unblock],[data-quickprog],[data-saveprogress],[data-pg],[data-setprog],[data-addcmt],[data-addlink],[data-savelink],[data-dellink],[data-delatt],[data-adddep],[data-savedep],[data-toggledep],[data-deldep],[data-saveemp],[data-saveproj],[data-bulk],[data-savebulk],[data-quick],[data-pick],[data-startbreak],[data-export],[data-week],[data-clearfilters],[data-clearteamfilters],[data-clearovfilters],[data-blockfilter],[data-sort],[data-teamsort],[data-copysummary],[data-dayboard],[data-addplan],[data-toggleplan],[data-delplan],[data-prefillplan],[data-adddept],[data-deldept],[data-addteam],[data-delteam],[data-addstatus],[data-delstatus],[data-wd],[data-dayteam],[data-addboard],[data-delboard]");
+  const el = ev.target.closest("[data-newtask],[data-newtboard],[data-savetboard],[data-tbtoggle],[data-view],[data-go],[data-kpi],[data-open],[data-close],[data-tab],[data-account],[data-savepw],[data-logout],[data-copytemp],[data-resetpw],[data-emp],[data-proj],[data-projtasks],[data-newfor],[data-newemp],[data-editemp],[data-newproj],[data-delproj],[data-edittask],[data-savetask],[data-deltask],[data-complete],[data-reopen],[data-blockit],[data-saveblocker],[data-unblock],[data-quickprog],[data-saveprogress],[data-pg],[data-setprog],[data-addcmt],[data-addlink],[data-savelink],[data-dellink],[data-delatt],[data-adddep],[data-savedep],[data-toggledep],[data-deldep],[data-saveemp],[data-saveproj],[data-bulk],[data-savebulk],[data-quick],[data-pick],[data-startbreak],[data-export],[data-week],[data-clearfilters],[data-clearteamfilters],[data-clearovfilters],[data-blockfilter],[data-sort],[data-teamsort],[data-copysummary],[data-dayboard],[data-addplan],[data-toggleplan],[data-delplan],[data-prefillplan],[data-adddept],[data-deldept],[data-addteam],[data-delteam],[data-addstatus],[data-delstatus],[data-wd],[data-dayteam],[data-addboard],[data-delboard],[data-newgvpost],[data-savegvpost],[data-gvlike],[data-gvaddcmt],[data-gvfilter],[data-gvmanage],[data-gvmoveup],[data-gvmovedown],[data-gvskip],[data-gvsavereassign],[data-gvhidepost],[data-gvhidecmt]");
   if (!el) return;
   const d = el.dataset;
 
@@ -182,7 +182,7 @@ document.addEventListener("click", async ev => {
     const p = sel ? Number(sel.dataset.pg) : (t.progress || 0);
     const patch = { progress: p, status: $("#pg-status").value, expectedCompletion: $("#pg-exp").value || null };
     if ($("#pg-hours").value !== "") patch.actualHours = Number($("#pg-hours").value);
-    if (isManager() && $("#pg-due").value) patch.dueDate = $("#pg-due").value;
+    if ((isManager() || (hasCapability("tasks") && inManagedScope(t))) && $("#pg-due").value) patch.dueDate = $("#pg-due").value;
     if (patch.status === "COMPLETED") { patch.progress = 100; patch.completedAt = nowISO(); }
     if (patch.status === "BLOCKED" && !(t.blocker && t.blocker.reason)) { toast("Use “Report blocker” so the reason is captured.", true); return; }
     const note = $("#pg-note").value.trim();
@@ -256,18 +256,70 @@ document.addEventListener("click", async ev => {
     return renderDrawer();
   }
 
+  /* ---- good vibes wall ---- */
+  if ("newgvpost" in d) return openLayer(goodVibesPostModal());
+  if ("savegvpost" in d) {
+    const err = m => { $("#gv-err").innerHTML = `<div class="hlp err">${esc(m)}</div>`; };
+    const category = $("#gv-category").value;
+    const body = $("#gv-body").value.trim();
+    if (!body) return err("Write something first.");
+    const ok = await postGoodVibes(category, body);
+    if (ok) { closeLayer(); toast("Posted to the wall!"); }
+    return;
+  }
+  if (d.gvlike) { await toggleGoodVibesLike(d.gvlike); return; }
+  if (d.gvaddcmt) {
+    const ta = $(`[data-gvcmtinput="${d.gvaddcmt}"]`);
+    const body = ta ? ta.value.trim() : "";
+    if (!body) return;
+    if (await addGoodVibesComment(d.gvaddcmt, body)) toast("Comment added");
+    return;
+  }
+  if ("gvfilter" in d) { S.goodVibesFilter.category = d.gvfilter; return persistState("goodVibesFilter"); }
+  if ("gvmanage" in d) { await loadGoodVibesRotation(); return openLayer(goodVibesRotationModal()); }
+  if (d.gvmoveup || d.gvmovedown) {
+    const id = d.gvmoveup || d.gvmovedown;
+    const rot = S.goodVibes.rotation;
+    const i = rot.findIndex(r => r.employeeId === id);
+    const j = d.gvmoveup ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= rot.length) return;
+    const tmp = rot[i]; rot[i] = rot[j]; rot[j] = tmp;
+    openLayer(goodVibesRotationModal());
+    await saveGoodVibesRotation(rot.map(r => r.employeeId));
+    return;
+  }
+  if ("gvskip" in d) { await skipGoodVibesToday(); return openLayer(goodVibesRotationModal()); }
+  if ("gvsavereassign" in d) {
+    const sel = $("#gv-reassign-select"); if (!sel) return;
+    await reassignGoodVibesToday(sel.value);
+    return openLayer(goodVibesRotationModal());
+  }
+  if (d.gvhidepost) {
+    if (!confirm("Hide this post? It will no longer show on the wall.")) return;
+    await hideGoodVibesPost(d.gvhidepost);
+    return;
+  }
+  if (d.gvhidecmt) {
+    const [postId, cmtId] = d.gvhidecmt.split(":");
+    if (!confirm("Hide this comment?")) return;
+    await hideGoodVibesComment(postId, cmtId);
+    return;
+  }
+
   /* ---- people & projects ---- */
   if ("newemp" in d) { if (!canAdmin()) return toast("Managers only.", true); return openLayer(employeeModal(null)); }
-  if (d.editemp) { if (!canAdmin()) return toast("Managers only.", true); return openLayer(employeeModal(emp(d.editemp))); }
+  if (d.editemp) { if (!canEditPerson(emp(d.editemp))) return toast("You can only edit people on your own team.", true); return openLayer(employeeModal(emp(d.editemp))); }
   if (d.saveemp) {
     const isNew = d.isnew === "true";
     const base = isNew ? { id: d.saveemp } : clone(emp(d.saveemp) || { id: d.saveemp });
     const name = $("#ef-name").value.trim();
     if (!name) { toast("A name is required.", true); return; }
     const [dept, team] = ($("#ef-team").value || "|").split("|");
+    const capabilities = $$("[data-cap]").filter(c => c.checked).map(c => c.dataset.cap);
+    const managedTeams = $$("[data-mteam]").filter(c => c.checked).map(c => c.dataset.mteam);
     Object.assign(base, { name, initials: initials(name), username: $("#ef-username").value.trim(), title: $("#ef-title").value.trim(),
       role: $("#ef-role").value, departmentId: dept, teamId: team, capacityHours: Number($("#ef-cap").value) || 40,
-      active: $("#ef-active").checked, color: base.color || avColor(base.id) });
+      active: $("#ef-active").checked, color: base.color || avColor(base.id), capabilities, managedTeams });
     const saved = await saveEmployee(base);
     if (!saved) return;
     closeLayer();
@@ -416,6 +468,11 @@ document.addEventListener("change", ev => {
     })();
     return;
   }
+  if (id === "ef-role") {
+    const wrap = $("#ef-caps-wrap");
+    if (wrap) wrap.hidden = t.value !== "teamlead";
+    return;
+  }
   if (id === "dayboard-date") {
     const picked = dOf(t.value); if (!picked) return;
     S.dayBoardOffset = Math.min(0, daysBetween(new Date(), picked));
@@ -455,6 +512,12 @@ document.addEventListener("change", ev => {
     const hidden = new Set(cfg().hiddenNav || []);
     t.checked ? hidden.delete(ds.navhide) : hidden.add(ds.navhide);
     cfg().hiddenNav = Array.from(hidden);
+    return saveConfig();
+  }
+  if (ds.taskcolhide) {
+    const hidden = new Set(cfg().hiddenTaskCols || []);
+    t.checked ? hidden.delete(ds.taskcolhide) : hidden.add(ds.taskcolhide);
+    cfg().hiddenTaskCols = Array.from(hidden);
     return saveConfig();
   }
   if (ds.mynotify) return saveMyNotifyPrefs({ [ds.mynotify]: t.checked });
@@ -622,6 +685,38 @@ document.addEventListener("drop", async e => {
     ? { status: "COMPLETED", progress: 100, completedAt: nowISO() }
     : { status: "IN_PROGRESS", completedAt: null, reopenCount: (t.reopenCount || 0) + 1, progress: t.progress === 100 ? 90 : t.progress };
   await patchTask(id, patch);
+});
+
+/* ---- drag to reorder Settings' "All tasks — optional columns" list (own
+   classes/attributes so it never cross-triggers the Board/Task Board DnD above) ---- */
+let colDragId = null;
+document.addEventListener("dragstart", e => {
+  const el = e.target.closest("[data-colitem]"); if (!el) return;
+  colDragId = el.dataset.colitem; el.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+  try { e.dataTransfer.setData("text/plain", colDragId); } catch {}
+});
+document.addEventListener("dragend", e => { const el = e.target.closest("[data-colitem]"); if (el) el.classList.remove("dragging"); colDragId = null; $$(".colitem.over").forEach(x => x.classList.remove("over")); });
+document.addEventListener("dragover", e => {
+  const el = e.target.closest("[data-colitem]"); if (!el || !colDragId || el.dataset.colitem === colDragId) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = "move";
+  $$(".colitem.over").forEach(x => { if (x !== el) x.classList.remove("over"); });
+  el.classList.add("over");
+});
+document.addEventListener("drop", async e => {
+  const el = e.target.closest("[data-colitem]"); if (!el || !colDragId) return;
+  e.preventDefault();
+  $$(".colitem.over").forEach(x => x.classList.remove("over"));
+  const targetId = el.dataset.colitem, draggedId = colDragId; colDragId = null;
+  if (targetId === draggedId) return;
+  const order = normalizedTaskColOrder(cfg().taskColOrder);
+  const from = order.indexOf(draggedId), to = order.indexOf(targetId);
+  if (from < 0 || to < 0) return;
+  order.splice(from, 1);
+  order.splice(to, 0, draggedId);
+  cfg().taskColOrder = order;
+  render();
+  await saveConfig();
 });
 
 document.addEventListener("submit", async ev => {

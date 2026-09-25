@@ -97,7 +97,8 @@ function icon(name, cls = "") {
     plus:'<path d="M12 5v14M5 12h14"/>',
     edit:'<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/>',
     flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1Z"/><path d="M4 22v-7"/>',
-    inbox:'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1Z"/>'
+    inbox:'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1Z"/>',
+    heart:'<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78Z"/>'
   };
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${P[name] || ""}</svg>`;
 }
@@ -181,7 +182,9 @@ const DEFAULT_CONFIG = {
   progressSteps: [0, 10, 25, 50, 75, 90, 100],
   notify: { assigned: true, priority: true, dueSoon: true, overdue: true, blocked: true, comment: true, completed: false, reassigned: true },
   boards: [],
-  hiddenNav: []
+  hiddenNav: [],
+  hiddenTaskCols: ["progress", "created", "due", "expected", "updated", "est", "act", "blocker", "attention"],
+  taskColOrder: ["progress", "created", "due", "expected", "updated", "est", "act", "blocker", "attention"]
 };
 const PROGRESS_STEPS = [0, 10, 25, 50, 75, 90, 100];
 
@@ -204,6 +207,18 @@ const BOARD_CATEGORIES = [
   { id: "rock", label: "Rock" }
 ];
 const boardCategoryLabel = id => (BOARD_CATEGORIES.find(c => c.id === id) || {}).label || "To Do";
+
+/** Fixed Good Vibes Wall categories, mirrored on the server (src/domain.js) —
+ *  deliberately not config-driven, same convention as BOARD_CATEGORIES. */
+const GOOD_VIBES_CATEGORIES = [
+  { id: "THOUGHT",      label: "Good Thought", emoji: "💡" },
+  { id: "MOTIVATION",   label: "Motivation",   emoji: "🚀" },
+  { id: "FUNNY",        label: "Funny",        emoji: "😂" },
+  { id: "APPRECIATION", label: "Appreciation", emoji: "👏" },
+  { id: "WIN",          label: "Small Win",    emoji: "🌟" },
+  { id: "RANDOM",       label: "Random",       emoji: "🎲" }
+];
+const goodVibesCategory = id => GOOD_VIBES_CATEGORIES.find(c => c.id === id) || { id, label: id, emoji: "" };
 
 /** [key, label] pairs shared by the global default toggles (Settings) and
  *  each person's own override toggles (Account) — one list, not two. */
@@ -228,6 +243,8 @@ const S = {
   selection: new Set(),
   boardFilter: { assignee: "", project: "" },
   taskBoardFilter: store.get("taskBoardFilter", { category: "" }),
+  goodVibes: { today: null, posts: [], upcoming: [], rotation: [] },
+  goodVibesFilter: store.get("goodVibesFilter", { category: "" }),
   teamFilters: store.get("teamFilters", { priority: "", status: "" }),
   teamSort: store.get("teamSort", { key: "name", dir: 1 }),
   ovFilters: store.get("ovFilters", { priority: "", status: "" }),
@@ -258,6 +275,44 @@ function teamName(deptId, teamId) {
 }
 const allTeams = () => cfg().departments.flatMap(d => (d.teams || []).map(t => ({ ...t, deptId: d.id, deptName: d.name })));
 const isManager = () => !!S.me && S.me.role === "manager";
+/** A team-scoped manager: same elevated powers as a manager, but only over
+ *  whichever teams they manage — see inManagedScope()/visibleEmployees()
+ *  below, never used on its own to grant access. */
+const isTeamLead = () => !!S.me && S.me.role === "teamlead";
+const isManagerOrTeamLead = () => isManager() || isTeamLead();
+/** Every "deptId|teamId" the current team lead manages: the one they
+ *  personally belong to, plus any extra teams a manager put them in charge
+ *  of (S.me.managedTeams) — mirrors src/domain.js's managedTeamKeys(). */
+const managedTeamKeys = () => {
+  if (!S.me) return [];
+  const own = `${S.me.departmentId}|${S.me.teamId}`;
+  const extra = Array.isArray(S.me.managedTeams) ? S.me.managedTeams : [];
+  return Array.from(new Set([own, ...extra]));
+};
+const inManagedScope = e => !!e && managedTeamKeys().includes(`${e.departmentId}|${e.teamId}`);
+/** The individually-toggleable powers a manager can grant a team lead —
+ *  mirrored from src/domain.js's TEAM_LEAD_CAPABILITIES, same duplication
+ *  convention as BOARD_CATEGORIES/NOTIFY_LABELS. */
+const TEAM_LEAD_CAPABILITIES = [
+  { id: "team",      label: "Team page — view & edit their own team's people" },
+  { id: "tasks",     label: "Manage their team's tasks — assign, due dates, complete (also scopes Board/All Tasks/Task Board to their team)" },
+  { id: "blockers",  label: "Blockers page" },
+  { id: "working",   label: "Currently working on page" },
+  { id: "daily",     label: "Daily summary page" },
+  { id: "dayboard",  label: "Day plan board page" },
+  { id: "goodvibes", label: "Manage today's Good Vibes Wall turn for their team" }
+];
+/** True for a manager unconditionally; for a team lead, only if this
+ *  specific capability was granted. Never true for a plain employee. */
+const hasCapability = cap => isManager() || (isTeamLead() && Array.isArray(S.me.capabilities) && S.me.capabilities.includes(cap));
+/** Everyone a manager sees; a team lead's managed teams only; an employee
+ *  sees everyone too (existing behavior — read access to the roster was
+ *  already org-wide before Team Lead existed, only edit rights differ). */
+const visibleEmployees = () => {
+  if (!S.me) return [];
+  if (isTeamLead()) return S.employees.filter(inManagedScope);
+  return S.employees;
+};
 const meId = () => S.me ? S.me.id : null;
 
 /** A day plan is a short checklist, stored as JSON inside daily_updates.current

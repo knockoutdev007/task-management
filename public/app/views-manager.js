@@ -214,7 +214,7 @@ function deadlineGroups(list) {
    VIEW · CURRENTLY WORKING ON
    ========================================================================== */
 function viewWorking() {
-  const people = S.employees.filter(e => e.active !== false);
+  const people = visibleEmployees().filter(e => e.active !== false);
   const withWork = people.filter(e => currentTasks(e.id, 1).length);
   const idle = people.filter(e => !currentTasks(e.id, 1).length);
   return `

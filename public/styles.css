@@ -425,6 +425,21 @@ table.t tr.grp-row:hover td { background: var(--surface-2); }
 .p-LOW      { background: var(--low-soft); color: var(--low); border-color: var(--line); }
 .p-CRITICAL::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--crit); box-shadow: 0 0 0 2px color-mix(in srgb, var(--crit) 25%, transparent); }
 
+/* Team Lead role pill — the app's own accent/brand color, so it reads as a
+   highlighted "in-between" role rather than reusing Manager's or Employee's. */
+.p-TEAMLEAD { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); font-weight: 700; }
+
+/* Good Vibes Wall categories — reuse the same tokens as the priority pills
+   above, picked for their hue association rather than their usual severity
+   meaning (e.g. APPRECIATION borrows the "critical" red purely as a warm
+   "heart" color here). */
+.p-THOUGHT      { background: var(--med-soft); color: var(--med); border-color: var(--med-line); }
+.p-MOTIVATION   { background: var(--high-soft); color: var(--high); border-color: var(--high-line); }
+.p-FUNNY        { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
+.p-APPRECIATION { background: var(--crit-soft); color: var(--crit); border-color: var(--crit-line); }
+.p-WIN          { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line); }
+.p-RANDOM       { background: var(--low-soft); color: var(--low); border-color: var(--line); }
+
 .st { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; white-space: nowrap; }
 .st::before { content: ""; width: 7px; height: 7px; border-radius: 2px; flex: none; }
 .st-NOT_STARTED::before  { background: var(--ink-4); }
@@ -513,6 +528,18 @@ table.t tr.grp-row:hover td { background: var(--surface-2); }
 }
 .kcard:hover, .tbcard:hover { border-color: var(--accent-line); }
 .kcard.dragging, .tbcard.dragging { opacity: .4; }
+
+/* Draggable Settings list rows (e.g. "All tasks — optional columns") — its
+   own data-colitem drag zone, distinct from .kcard/.tbcard's, so the two
+   never cross-trigger each other (see events.js). */
+.colitem {
+  display: flex; gap: 8px; align-items: center; font-size: 12.5px; cursor: grab;
+  padding: 5px 8px; border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: var(--surface);
+}
+.colitem:hover { border-color: var(--accent-line); }
+.colitem.dragging { opacity: .4; }
+.colitem.over { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.colitem-grip { color: var(--ink-4); letter-spacing: -2px; font-size: 11px; cursor: grab; }
 .kcard .kt, .tbcard .kt { font-size: 12.2px; font-weight: 600; line-height: 1.32; }
 .kcard .krow, .tbcard .krow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 10.5px; color: var(--ink-3); }
 .kcard .kstripe, .tbcard .kstripe { height: 2px; border-radius: 2px; margin: -9px -10px 2px; }

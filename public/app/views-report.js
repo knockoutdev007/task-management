@@ -251,6 +251,17 @@ function viewSettings() {
               <input type="checkbox" data-navhide="${k}" ${(c.hiddenNav || []).includes(k) ? "" : "checked"}>${esc(VIEWS[k].label)}</label>`).join("")}
           <div class="hlp">Unchecking an item hides it from every manager's sidebar. Re-check it here to bring it back.</div>
         </div></section>
+
+      <section class="panel"><div class="panel-h"><h2>All tasks — optional columns</h2></div>
+        <div class="panel-b" style="display:grid;gap:5px">
+          ${normalizedTaskColOrder(c.taskColOrder).map(k => {
+            const label = (HIDEABLE_TASK_COLS.find(([id]) => id === k) || [])[1] || k;
+            return `<label draggable="true" data-colitem="${esc(k)}" class="colitem">
+                <span class="colitem-grip" aria-hidden="true">⠿⠿</span>
+                <input type="checkbox" data-taskcolhide="${esc(k)}" ${(c.hiddenTaskCols || []).includes(k) ? "" : "checked"}>${esc(label)}</label>`;
+          }).join("")}
+          <div class="hlp">Drag to reorder, uncheck to hide — both apply to the "All tasks" table for everyone immediately. The data isn't deleted, just decluttered/reordered.</div>
+        </div></section>
     </div>
 
     <div class="stack">
@@ -298,8 +309,8 @@ function viewSettings() {
         <div class="sp"><button class="btn sm" data-newemp>${icon("plus")}Add person</button></div></div>
         <div class="tw"><table class="t"><thead><tr><th>Name</th><th>Role</th><th>Team</th><th class="c">Active</th><th></th></tr></thead>
           <tbody>${S.employees.map(e => `<tr>
-            <td>${personCell(e.id)}<div style="font-size:10.5px;color:var(--ink-4);padding-left:27px">${esc(e.username || "")}</div></td>
-            <td><span class="pill ${e.role === "manager" ? "p-HIGH" : "p-LOW"}">${esc(e.role)}</span></td>
+            <td>${personCell(e.id, true)}<div style="font-size:10.5px;color:var(--ink-4);padding-left:27px">${esc(e.username || "")}</div></td>
+            <td><span class="pill ${e.role === "manager" ? "p-HIGH" : e.role === "teamlead" ? "p-TEAMLEAD" : "p-LOW"}">${esc(e.role === "teamlead" ? "team lead" : e.role)}</span></td>
             <td style="font-size:11.5px">${esc(deptName(e.departmentId))} / ${esc(teamName(e.departmentId, e.teamId))}</td>
             <td class="c">${e.active === false ? "<span style='color:var(--ink-4)'>no</span>" : "yes"}</td>
             <td class="r"><button class="btn sm" data-editemp="${esc(e.id)}">Edit</button></td>

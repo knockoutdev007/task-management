@@ -21,13 +21,22 @@ CREATE TABLE IF NOT EXISTS employees (
   username             VARCHAR(190) NOT NULL UNIQUE COLLATE utf8mb4_general_ci,  -- case-insensitive; every other column here is case-sensitive
   password_hash        VARCHAR(255),                       -- null until the first password is set
   must_change_password TINYINT(1) NOT NULL DEFAULT 0,
-  role                 VARCHAR(16) NOT NULL DEFAULT 'employee' CHECK (role IN ('manager','employee')),
+  role                 VARCHAR(16) NOT NULL DEFAULT 'employee' CHECK (role IN ('manager','employee','teamlead')),
   title                VARCHAR(255) NOT NULL DEFAULT '',
   department_id        VARCHAR(64) NOT NULL DEFAULT '',
   team_id              VARCHAR(64) NOT NULL DEFAULT '',
   manager_id           VARCHAR(64),
   capacity_hours       INT NOT NULL DEFAULT 40,
   color                VARCHAR(16) NOT NULL DEFAULT '#0E7C86',
+  -- JSON array of TEAM_LEAD_CAPABILITIES ids (src/domain.js) — only meaningful
+  -- when role = 'teamlead'; a manager picks which of the team-lead powers this
+  -- specific person actually has. Ignored for 'manager' (already has everything)
+  -- and 'employee' (has none).
+  capabilities         TEXT NOT NULL DEFAULT '[]',
+  -- JSON array of "deptId|teamId" strings — extra teams a manager has put this
+  -- team lead in charge of, beyond the one they personally belong to
+  -- (department_id/team_id above). Only meaningful when role = 'teamlead'.
+  managed_teams        TEXT NOT NULL DEFAULT '[]',
   active               TINYINT(1) NOT NULL DEFAULT 1,
   last_login_at        VARCHAR(32),
   created_at           VARCHAR(32) NOT NULL,
@@ -205,4 +214,75 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at  VARCHAR(32) NOT NULL,
   INDEX idx_sessions_expiry (expires_at),
   FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+-- Good Vibes Wall: one active employee posts each working day, on a fair
+-- rotating schedule. Kept as its own set of tables rather than new columns
+-- on `employees`/`tasks`, so the existing task-management schema is untouched.
+
+CREATE TABLE IF NOT EXISTS good_vibes_rotation_order (
+  employee_id VARCHAR(64) PRIMARY KEY,
+  sort_order  INT NOT NULL,
+  updated_at  VARCHAR(32) NOT NULL,
+  INDEX idx_gv_rotation_order (sort_order),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS good_vibes_assignments (
+  id                   VARCHAR(64) PRIMARY KEY,
+  date                 VARCHAR(10) NOT NULL UNIQUE,   -- YYYY-MM-DD
+  employee_id          VARCHAR(64) NOT NULL,
+  status               VARCHAR(16) NOT NULL DEFAULT 'scheduled'
+                          CHECK (status IN ('scheduled','skipped','reassigned')),
+  skipped_employee_id  VARCHAR(64),                   -- audit: who was skipped, if any
+  reassigned_by_id     VARCHAR(64),                   -- audit: which manager reassigned, if any
+  created_at           VARCHAR(32) NOT NULL,
+  updated_at           VARCHAR(32) NOT NULL,
+  INDEX idx_gv_assignments_date (date),
+  INDEX idx_gv_assignments_employee (employee_id, date),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+  FOREIGN KEY (skipped_employee_id) REFERENCES employees(id) ON DELETE SET NULL,
+  FOREIGN KEY (reassigned_by_id) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS good_vibes_posts (
+  id            VARCHAR(64) PRIMARY KEY,
+  assignment_id VARCHAR(64) NOT NULL UNIQUE,   -- one post per assigned day
+  employee_id   VARCHAR(64) NOT NULL,
+  category      VARCHAR(24) NOT NULL,
+  body          TEXT NOT NULL,
+  hidden_at     VARCHAR(32),                   -- moderation: soft-hide, not delete
+  hidden_by_id  VARCHAR(64),
+  created_at    VARCHAR(32) NOT NULL,
+  updated_at    VARCHAR(32) NOT NULL,
+  INDEX idx_gv_posts_employee (employee_id, created_at),
+  INDEX idx_gv_posts_created (created_at),
+  FOREIGN KEY (assignment_id) REFERENCES good_vibes_assignments(id) ON DELETE CASCADE,
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+  FOREIGN KEY (hidden_by_id) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS good_vibes_likes (
+  id          VARCHAR(64) PRIMARY KEY,
+  post_id     VARCHAR(64) NOT NULL,
+  employee_id VARCHAR(64) NOT NULL,
+  created_at  VARCHAR(32) NOT NULL,
+  UNIQUE KEY uq_gv_likes_post_employee (post_id, employee_id),
+  INDEX idx_gv_likes_post (post_id),
+  FOREIGN KEY (post_id) REFERENCES good_vibes_posts(id) ON DELETE CASCADE,
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS good_vibes_comments (
+  id           VARCHAR(64) PRIMARY KEY,
+  post_id      VARCHAR(64) NOT NULL,
+  author_id    VARCHAR(64),
+  at           VARCHAR(32) NOT NULL,
+  body         TEXT NOT NULL,
+  hidden_at    VARCHAR(32),
+  hidden_by_id VARCHAR(64),
+  INDEX idx_gv_comments_post (post_id, at),
+  FOREIGN KEY (post_id) REFERENCES good_vibes_posts(id) ON DELETE CASCADE,
+  FOREIGN KEY (author_id) REFERENCES employees(id) ON DELETE SET NULL,
+  FOREIGN KEY (hidden_by_id) REFERENCES employees(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
