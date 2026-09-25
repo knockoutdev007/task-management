@@ -74,7 +74,7 @@ async function initData() {
     S.connected = true;
     const onExtraBoard = S.me.role === "manager" && extraBoard(S.view);
     const blocked = S.me.role === "manager" && isNavHidden(S.view);
-    if (!onExtraBoard && (blocked || !VIEWS[S.view] || !VIEWS[S.view].roles.includes(S.me.role))) S.view = (S.me.role === "manager" && !isNavHidden("cc")) ? "cc" : "myday";
+    if (!onExtraBoard && (blocked || !viewAllowed(S.view))) S.view = (S.me.role === "manager" && !isNavHidden("cc")) ? "cc" : "myday";
     openStream();
   }
   render();
@@ -477,13 +477,13 @@ function validateTask(t) {
 function canEdit(t) {
   if (!S.me) return false;
   if (isManager()) return true;
-  if (isTeamLead() && t.departmentId === S.me.departmentId && t.teamId === S.me.teamId) return true;
+  if (hasCapability("tasks") && inManagedScope(t)) return true;
   return t.assigneeId === meId() || t.createdById === meId();
 }
 function canComplete(t) {
   if (!S.me) return false;
   if (isManager()) return true;
-  if (isTeamLead() && t.departmentId === S.me.departmentId && t.teamId === S.me.teamId) return true;
+  if (hasCapability("tasks") && inManagedScope(t)) return true;
   return t.assigneeId === meId();
 }
 const canAdmin = () => isManager();
@@ -491,7 +491,7 @@ const canAdmin = () => isManager();
  *  on their own team — server mirror: src/routes/admin.js's PUT /employees/:id. */
 function canEditPerson(e) {
   if (!S.me || !e) return false;
-  return isManager() || (isTeamLead() && sameTeamAs(e));
+  return isManager() || (hasCapability("team") && inManagedScope(e));
 }
 // TODO: restrict to Managers — flip this to `return isManager();` (server mirror: src/domain.js canManageTaskBoard)
 function canManageTaskBoard() { return !!S.me; }

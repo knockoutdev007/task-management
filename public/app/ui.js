@@ -48,18 +48,19 @@ function emptyState(title, msg) { return `<div class="empty"><strong>${esc(title
 function taskLink(t) {
   return `<button class="linkish" data-open="${esc(t.id)}">${esc(t.title)}</button>`;
 }
-function personCell(id) {
+function personCell(id, clickable) {
   const e = emp(id);
-  return `<span class="cellname">${av(e, "sm")}<span class="tx">${esc(e ? e.name : "Unassigned")}</span></span>`;
+  const name = esc(e ? e.name : "Unassigned");
+  return `<span class="cellname">${av(e, "sm")}<span class="tx">${clickable && e ? `<button class="linkish" data-emp="${esc(e.id)}">${name}</button>` : name}</span></span>`;
 }
 
 /* ---------------------------------------------------------------- filtering */
 function visibleTasks() {
   // Employees see their own work plus anything they created; a team lead
-  // sees their whole team's; managers see all.
+  // sees every team they manage; managers see all.
   if (!S.me) return [];
   if (isManager()) return S.tasks;
-  if (isTeamLead()) return S.tasks.filter(t => t.departmentId === S.me.departmentId && t.teamId === S.me.teamId);
+  if (isTeamLead() && hasCapability("tasks")) return S.tasks.filter(inManagedScope);
   return S.tasks.filter(t => t.assigneeId === meId() || t.createdById === meId());
 }
 function applyFilters(list, F) {
@@ -124,23 +125,36 @@ function sortTasks(list) {
 /* ==========================================================================
    NAVIGATION
    ========================================================================== */
+// A view with a `cap` set is additionally gated, for a team lead only, on
+// hasCapability(cap) — a manager (and an employee, on the views they share)
+// is unaffected; see paint()'s redirect logic and paintNav()'s filter below.
 const VIEWS = {
   cc:        { label: "Overview",       icon: "grid",     roles: ["manager"] },
   myday:     { label: "My Day",         icon: "sunrise",  roles: ["manager", "employee", "teamlead"] },
-  working:   { label: "Currently on",   icon: "users",    roles: ["manager", "teamlead"] },
+  working:   { label: "Currently on",   icon: "users",    roles: ["manager", "teamlead"], cap: "working" },
   attention: { label: "Requires attention", icon: "alert", roles: ["manager"] },
   managerboard: { label: "Managers Board", icon: "board", roles: ["manager"] },
   board:     { label: "Board",          icon: "board",    roles: ["manager", "employee", "teamlead"] },
   tasks:     { label: "All tasks",      icon: "list",     roles: ["manager", "employee", "teamlead"] },
-  team:      { label: "Team",           icon: "users",    roles: ["manager", "teamlead"] },
-  blockers:  { label: "Blockers",       icon: "ban",      roles: ["manager", "teamlead"] },
+  team:      { label: "Team",           icon: "users",    roles: ["manager", "teamlead"], cap: "team" },
+  blockers:  { label: "Blockers",       icon: "ban",      roles: ["manager", "teamlead"], cap: "blockers" },
   projects:  { label: "Projects",       icon: "folder",   roles: ["manager", "employee", "teamlead"] },
-  daily:     { label: "Daily summary",  icon: "inbox",    roles: ["manager", "teamlead"] },
-  dayboard:  { label: "Day plan board", icon: "board",    roles: ["manager", "teamlead"] },
+  daily:     { label: "Daily summary",  icon: "inbox",    roles: ["manager", "teamlead"], cap: "daily" },
+  dayboard:  { label: "Day plan board", icon: "board",    roles: ["manager", "teamlead"], cap: "dayboard" },
   update:    { label: "Daily update",   icon: "edit",     roles: ["manager", "employee", "teamlead"] },
   analytics: { label: "Analytics",      icon: "chart",    roles: ["manager"] },
   goodvibes: { label: "Good Vibes Wall", icon: "heart",   roles: ["manager", "employee", "teamlead"] },
   settings:  { label: "Settings",       icon: "cog",      roles: ["manager"] }
+};
+/** True if this view is open to the current role — role membership first,
+ *  then (team leads only) the specific capability grant. */
+const viewAllowed = v => {
+  const def = VIEWS[v];
+  if (!def) return false;
+  const role = S.me ? S.me.role : "employee";
+  if (!def.roles.includes(role)) return false;
+  if (def.cap && role === "teamlead") return hasCapability(def.cap);
+  return true;
 };
 const NAV_GROUPS = [
   { h: "Overview", items: ["cc", "myday", "working", "attention"] },
@@ -173,7 +187,7 @@ function paintNav() {
   const hidden = new Set(cfg().hiddenNav || []);
   const boards = role === "manager" ? (cfg().boards || []) : [];
   $("#nav").innerHTML = NAV_GROUPS.map(g => {
-    const items = g.items.filter(v => VIEWS[v].roles.includes(role) && !hidden.has(v));
+    const items = g.items.filter(v => viewAllowed(v) && !hidden.has(v));
     const extra = g.h === "Manager" ? boards : [];
     if (!items.length && !extra.length) return "";
     const boardBtns = extra.map(b => `<button class="nav-i" data-view="${esc(b.id)}" ${S.view === b.id ? 'aria-current="page"' : ""}>${icon("board")}<span>${esc(b.name)}</span></button>`).join("");
@@ -229,7 +243,7 @@ function paint() {
   const role = S.me.role;
   const onExtraBoard = role === "manager" && extraBoard(S.view);
   const blocked = role === "manager" && isNavHidden(S.view);
-  if (!onExtraBoard && (blocked || !VIEWS[S.view] || !VIEWS[S.view].roles.includes(role))) S.view = (role === "manager" && !isNavHidden("cc")) ? "cc" : "myday";
+  if (!onExtraBoard && (blocked || !viewAllowed(S.view))) S.view = (role === "manager" && !isNavHidden("cc")) ? "cc" : "myday";
 
   const banner = S.offline
     ? `<div class="banner">${icon("alert")}<span><strong>Not connected.</strong> Changes you make now won’t be saved until the connection comes back.</span></div>`

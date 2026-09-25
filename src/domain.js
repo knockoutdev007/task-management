@@ -9,11 +9,49 @@ import { getConfig } from "./db.js";
 
 export const isManager = user => !!user && user.role === "manager";
 /** A team-scoped manager: same elevated powers as a manager, but only over
- *  their own department+team's people and tasks — see the functions below
- *  that check this alongside a team match, never on its own. */
+ *  their own department+team's people and tasks, and only for whichever
+ *  specific capabilities a real manager granted them (see hasCapability) —
+ *  see the functions below that check this alongside a team match and a
+ *  capability check, never isTeamLead() alone. */
 export const isTeamLead = user => !!user && user.role === "teamlead";
 export const isManagerOrTeamLead = user => isManager(user) || isTeamLead(user);
 export const sameTeam = (a, b) => !!a && !!b && a.departmentId === b.departmentId && a.teamId === b.teamId;
+
+/** Every "deptId|teamId" a team lead manages: the one they personally belong
+ *  to, plus any extra teams a manager put them in charge of via
+ *  employees.managed_teams. Managers/employees never call this — team-scoped
+ *  checks go through inManagedScope() below, not a single sameTeam() match. */
+export function managedTeamKeys(user) {
+  if (!user) return [];
+  const own = `${user.departmentId}|${user.teamId}`;
+  const extra = Array.isArray(user.managedTeams) ? user.managedTeams : [];
+  return Array.from(new Set([own, ...extra]));
+}
+/** Is `target` (a task or an employee — anything with departmentId/teamId) in
+ *  any team this user manages? */
+export function inManagedScope(user, target) {
+  if (!user || !target) return false;
+  return managedTeamKeys(user).includes(`${target.departmentId}|${target.teamId}`);
+}
+
+/** The individually-toggleable powers a manager can grant a team lead —
+ *  stored per person as employees.capabilities (a JSON array of these ids).
+ *  A manager already has all of them implicitly; an employee has none. */
+export const TEAM_LEAD_CAPABILITIES = [
+  { id: "team",      label: "Team page — view & edit their own team's people" },
+  { id: "tasks",     label: "Manage their team's tasks — assign, due dates, complete (also scopes Board/All Tasks/Task Board to their team)" },
+  { id: "blockers",  label: "Blockers page" },
+  { id: "working",   label: "Currently working on page" },
+  { id: "daily",     label: "Daily summary page" },
+  { id: "dayboard",  label: "Day plan board page" },
+  { id: "goodvibes", label: "Manage today's Good Vibes Wall turn for their team" }
+];
+/** True for a manager unconditionally; for a team lead, only if this
+ *  specific capability was granted to them. Never true for a plain employee. */
+export function hasCapability(user, cap) {
+  if (isManager(user)) return true;
+  return isTeamLead(user) && Array.isArray(user.capabilities) && user.capabilities.includes(cap);
+}
 
 const statusKind = (cfg, id) => (cfg.statuses.find(s => s.id === id) || { kind: "open" }).kind;
 export const isClosedStatus = (cfg, id) => statusKind(cfg, id) === "done";
@@ -31,20 +69,20 @@ export const breakType = id => BREAK_TYPES.find(t => t.id === id) || null;
 /* ------------------------------------------------------------ permissions */
 
 /** Who may change a task at all. Employees own their own work; a team lead
- *  also owns every task already on their own team. */
+ *  granted the "tasks" capability also owns every task on any team they manage. */
 export function canEditTask(user, stored) {
   if (!user) return false;
   if (isManager(user)) return true;
-  if (isTeamLead(user) && stored && sameTeam(user, stored)) return true;
+  if (hasCapability(user, "tasks") && stored && inManagedScope(user, stored)) return true;
   if (!stored) return true;                              // creating their own
   return stored.assigneeId === user.id || stored.createdById === user.id;
 }
-/** Who may mark it done — the person doing the work, a team lead for their
- *  own team's tasks, or a manager. */
+/** Who may mark it done — the person doing the work, a "tasks"-capable team
+ *  lead for a task on any team they manage, or a manager. */
 export function canCompleteTask(user, stored) {
   if (!user) return false;
   if (isManager(user)) return true;
-  if (isTeamLead(user) && stored && sameTeam(user, stored)) return true;
+  if (hasCapability(user, "tasks") && stored && inManagedScope(user, stored)) return true;
   return !!(stored && stored.assigneeId === user.id);
 }
 

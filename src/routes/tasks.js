@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import * as store from "../db.js";
 import {
   canEditTask, canCompleteTask, applyFieldPermissions, validateTask,
-  diffActivity, noteEntry, isManager, isTeamLead, notificationRecipients, mentionedEmployeeIds,
+  diffActivity, noteEntry, isManager, isTeamLead, hasCapability, inManagedScope, notificationRecipients, mentionedEmployeeIds,
   canManageTaskBoard, isBoardTimerRunning, nextBoardPauseState
 } from "../domain.js";
 import { wrap } from "../wrap.js";
@@ -54,17 +54,18 @@ async function writeTask(user, id, incoming, extraNotes) {
   const stored = await store.getTask(id);
   if (!canEditTask(user, stored)) return { status: 403, body: { error: "You can only change your own tasks." } };
 
-  // A team lead may set assigneeId/dueDate like a manager, but only within
-  // their own team — resolved here (not in applyFieldPermissions, which is
-  // pure/no DB access) by looking up whoever the task would end up assigned
-  // to, existing or incoming, and checking they're on the team lead's team.
+  // A team lead granted the "tasks" capability may set assigneeId/dueDate
+  // like a manager, but only within a team they manage — resolved here (not
+  // in applyFieldPermissions, which is pure/no DB access) by looking up
+  // whoever the task would end up assigned to, existing or incoming, and
+  // checking they're on one of the team lead's teams.
   let teamLeadCanManage = false;
-  if (isTeamLead(user) && !isManager(user)) {
+  if (isTeamLead(user) && !isManager(user) && hasCapability(user, "tasks")) {
     const candidateId = incoming.assigneeId || (stored ? stored.assigneeId : user.id);
     if (candidateId === user.id) teamLeadCanManage = true;
     else if (candidateId) {
       const target = await store.getEmployee(candidateId);
-      teamLeadCanManage = !!(target && target.departmentId === user.departmentId && target.teamId === user.teamId);
+      teamLeadCanManage = inManagedScope(user, target);
     }
   }
 

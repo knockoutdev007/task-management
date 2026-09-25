@@ -182,7 +182,7 @@ document.addEventListener("click", async ev => {
     const p = sel ? Number(sel.dataset.pg) : (t.progress || 0);
     const patch = { progress: p, status: $("#pg-status").value, expectedCompletion: $("#pg-exp").value || null };
     if ($("#pg-hours").value !== "") patch.actualHours = Number($("#pg-hours").value);
-    if ((isManager() || (isTeamLead() && sameTeamAs(t))) && $("#pg-due").value) patch.dueDate = $("#pg-due").value;
+    if ((isManager() || (hasCapability("tasks") && inManagedScope(t))) && $("#pg-due").value) patch.dueDate = $("#pg-due").value;
     if (patch.status === "COMPLETED") { patch.progress = 100; patch.completedAt = nowISO(); }
     if (patch.status === "BLOCKED" && !(t.blocker && t.blocker.reason)) { toast("Use “Report blocker” so the reason is captured.", true); return; }
     const note = $("#pg-note").value.trim();
@@ -315,9 +315,11 @@ document.addEventListener("click", async ev => {
     const name = $("#ef-name").value.trim();
     if (!name) { toast("A name is required.", true); return; }
     const [dept, team] = ($("#ef-team").value || "|").split("|");
+    const capabilities = $$("[data-cap]").filter(c => c.checked).map(c => c.dataset.cap);
+    const managedTeams = $$("[data-mteam]").filter(c => c.checked).map(c => c.dataset.mteam);
     Object.assign(base, { name, initials: initials(name), username: $("#ef-username").value.trim(), title: $("#ef-title").value.trim(),
       role: $("#ef-role").value, departmentId: dept, teamId: team, capacityHours: Number($("#ef-cap").value) || 40,
-      active: $("#ef-active").checked, color: base.color || avColor(base.id) });
+      active: $("#ef-active").checked, color: base.color || avColor(base.id), capabilities, managedTeams });
     const saved = await saveEmployee(base);
     if (!saved) return;
     closeLayer();
@@ -464,6 +466,11 @@ document.addEventListener("change", ev => {
       const ok = await uploadAttachment(taskId, file);
       if (ok) { toast("Sent " + file.name); drawerTab = "resources"; renderDrawer(); }
     })();
+    return;
+  }
+  if (id === "ef-role") {
+    const wrap = $("#ef-caps-wrap");
+    if (wrap) wrap.hidden = t.value !== "teamlead";
     return;
   }
   if (id === "dayboard-date") {

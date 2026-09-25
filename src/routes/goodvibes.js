@@ -12,7 +12,7 @@
  */
 import { randomUUID } from "node:crypto";
 import * as store from "../db.js";
-import { isManager, isTeamLead, sameTeam, GOOD_VIBES_CATEGORIES, nextInRotation, projectUpcoming } from "../domain.js";
+import { isManager, isTeamLead, inManagedScope, hasCapability, GOOD_VIBES_CATEGORIES, nextInRotation, projectUpcoming } from "../domain.js";
 import { broadcast } from "../events.js";
 import { wrap } from "../wrap.js";
 
@@ -114,8 +114,9 @@ export function mountGoodVibes(app, requireUser, requireManager, requireManagerO
     const assignment = await store.getAssignmentByDate(today);
     if (!assignment) return res.status(409).json({ error: "Today isn't a working day." });
     if (isTeamLead(req.user) && !isManager(req.user)) {
+      if (!hasCapability(req.user, "goodvibes")) return res.status(403).json({ error: "You don't have the Good Vibes Wall capability." });
       const current = await store.getEmployee(assignment.employeeId);
-      if (!current || !sameTeam(req.user, current)) return res.status(403).json({ error: "You can only skip today's turn when it's someone on your own team." });
+      if (!current || !inManagedScope(req.user, current)) return res.status(403).json({ error: "You can only skip today's turn when it's someone on your own team." });
     }
     if (await store.getGvPostByAssignment(assignment.id)) return res.status(409).json({ error: "Already posted today — can't change the assignment." });
     const order = await store.getActiveRotationOrder();
@@ -138,14 +139,15 @@ export function mountGoodVibes(app, requireUser, requireManager, requireManagerO
     const employee = await store.getEmployee(String(req.body?.employeeId || ""));
     if (!employee || !employee.active) return res.status(422).json({ error: "Pick an active person." });
     const teamLeadActing = isTeamLead(req.user) && !isManager(req.user);
+    if (teamLeadActing && !hasCapability(req.user, "goodvibes")) return res.status(403).json({ error: "You don't have the Good Vibes Wall capability." });
     if (teamLeadActing && date !== todayISO()) return res.status(403).json({ error: "Team leads can only reassign today's turn." });
-    if (teamLeadActing && !sameTeam(req.user, employee)) return res.status(403).json({ error: "You can only reassign to someone on your own team." });
+    if (teamLeadActing && !inManagedScope(req.user, employee)) return res.status(403).json({ error: "You can only reassign to someone on your own team." });
     if (date === todayISO()) await store.ensureAssignmentsThrough(date);
     const assignment = await store.getAssignmentByDate(date);
     if (!assignment) return res.status(409).json({ error: "That day doesn't have an assignment yet." });
     if (teamLeadActing) {
       const current = await store.getEmployee(assignment.employeeId);
-      if (!current || !sameTeam(req.user, current)) return res.status(403).json({ error: "You can only reassign today's turn when it's someone on your own team." });
+      if (!current || !inManagedScope(req.user, current)) return res.status(403).json({ error: "You can only reassign today's turn when it's someone on your own team." });
     }
     if (await store.getGvPostByAssignment(assignment.id)) return res.status(409).json({ error: "That day already has a post — it can't be reassigned." });
     const updated = await store.updateAssignment(assignment.id, {

@@ -276,17 +276,41 @@ function teamName(deptId, teamId) {
 const allTeams = () => cfg().departments.flatMap(d => (d.teams || []).map(t => ({ ...t, deptId: d.id, deptName: d.name })));
 const isManager = () => !!S.me && S.me.role === "manager";
 /** A team-scoped manager: same elevated powers as a manager, but only over
- *  their own department+team — see sameTeamAs()/visibleEmployees() below,
- *  never used on its own to grant access. */
+ *  whichever teams they manage — see inManagedScope()/visibleEmployees()
+ *  below, never used on its own to grant access. */
 const isTeamLead = () => !!S.me && S.me.role === "teamlead";
 const isManagerOrTeamLead = () => isManager() || isTeamLead();
-const sameTeamAs = e => !!S.me && !!e && S.me.departmentId === e.departmentId && S.me.teamId === e.teamId;
-/** Everyone a manager sees; a team lead's own department+team only; an
- *  employee sees everyone too (existing behavior — read access to the roster
- *  was already org-wide before Team Lead existed, only edit rights differ). */
+/** Every "deptId|teamId" the current team lead manages: the one they
+ *  personally belong to, plus any extra teams a manager put them in charge
+ *  of (S.me.managedTeams) — mirrors src/domain.js's managedTeamKeys(). */
+const managedTeamKeys = () => {
+  if (!S.me) return [];
+  const own = `${S.me.departmentId}|${S.me.teamId}`;
+  const extra = Array.isArray(S.me.managedTeams) ? S.me.managedTeams : [];
+  return Array.from(new Set([own, ...extra]));
+};
+const inManagedScope = e => !!e && managedTeamKeys().includes(`${e.departmentId}|${e.teamId}`);
+/** The individually-toggleable powers a manager can grant a team lead —
+ *  mirrored from src/domain.js's TEAM_LEAD_CAPABILITIES, same duplication
+ *  convention as BOARD_CATEGORIES/NOTIFY_LABELS. */
+const TEAM_LEAD_CAPABILITIES = [
+  { id: "team",      label: "Team page — view & edit their own team's people" },
+  { id: "tasks",     label: "Manage their team's tasks — assign, due dates, complete (also scopes Board/All Tasks/Task Board to their team)" },
+  { id: "blockers",  label: "Blockers page" },
+  { id: "working",   label: "Currently working on page" },
+  { id: "daily",     label: "Daily summary page" },
+  { id: "dayboard",  label: "Day plan board page" },
+  { id: "goodvibes", label: "Manage today's Good Vibes Wall turn for their team" }
+];
+/** True for a manager unconditionally; for a team lead, only if this
+ *  specific capability was granted. Never true for a plain employee. */
+const hasCapability = cap => isManager() || (isTeamLead() && Array.isArray(S.me.capabilities) && S.me.capabilities.includes(cap));
+/** Everyone a manager sees; a team lead's managed teams only; an employee
+ *  sees everyone too (existing behavior — read access to the roster was
+ *  already org-wide before Team Lead existed, only edit rights differ). */
 const visibleEmployees = () => {
   if (!S.me) return [];
-  if (isTeamLead()) return S.employees.filter(sameTeamAs);
+  if (isTeamLead()) return S.employees.filter(inManagedScope);
   return S.employees;
 };
 const meId = () => S.me ? S.me.id : null;

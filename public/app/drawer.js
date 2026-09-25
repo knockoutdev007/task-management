@@ -197,7 +197,7 @@ function drawerResources(t) {
 /* ------------------------------------------------------------- task form */
 function taskForm(existing, presetAssignee) {
   const t = existing || {
-    id: nextTaskId(), title: "", description: "", assigneeId: presetAssignee || (isManagerOrTeamLead() ? "" : meId()),
+    id: nextTaskId(), title: "", description: "", assigneeId: presetAssignee || ((isManager() || hasCapability("tasks")) ? "" : meId()),
     createdById: meId(), departmentId: "", teamId: "", projectId: "", category: "",
     priority: "MEDIUM", status: "NOT_STARTED", progress: 0,
     createdAt: nowISO(), startDate: todayISO(), dueDate: iso(addDays(new Date(), cfg().defaultDueDays)),
@@ -216,10 +216,10 @@ function taskForm(existing, presetAssignee) {
         <textarea class="inp" id="tf-desc" rows="3" placeholder="Detail, acceptance criteria, links to context.">${esc(t.description || "")}</textarea></div>
       <div class="frow f3">
         <div class="field"><label for="tf-assignee">Assigned to</label>
-          <select class="inp" id="tf-assignee" ${isManagerOrTeamLead() ? "" : "disabled"}>
+          <select class="inp" id="tf-assignee" ${(isManager() || hasCapability("tasks")) ? "" : "disabled"}>
             <option value="">Unassigned</option>
-            ${(isTeamLead() && !isManager() ? visibleEmployees() : S.employees).map(e => `<option value="${esc(e.id)}" ${t.assigneeId === e.id ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>
-          ${isManagerOrTeamLead() ? (isTeamLead() && !isManager() ? `<div class="hlp">Only your own team is shown.</div>` : "") : `<div class="hlp">Only a manager can assign work to someone else.</div>`}</div>
+            ${(hasCapability("tasks") && !isManager() ? visibleEmployees() : S.employees).map(e => `<option value="${esc(e.id)}" ${t.assigneeId === e.id ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>
+          ${(isManager() || hasCapability("tasks")) ? (hasCapability("tasks") && !isManager() ? `<div class="hlp">Only your own team is shown.</div>` : "") : `<div class="hlp">Only a manager can assign work to someone else.</div>`}</div>
         <div class="field"><label for="tf-project">Project</label>
           <select class="inp" id="tf-project"><option value="">None</option>
             ${S.projects.map(p => `<option value="${esc(p.id)}" ${t.projectId === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>
@@ -251,8 +251,6 @@ function taskForm(existing, presetAssignee) {
       </div>
       <div class="frow">
         <div class="field"><label for="tf-tags">Tags (comma separated)</label><input class="inp" id="tf-tags" value="${esc((t.tags || []).join(", "))}"></div>
-        <div class="field"><label for="tf-completed">Actual completion date</label><input class="inp" type="date" id="tf-completed" value="${esc((t.completedAt || "").slice(0, 10))}">
-          <div class="hlp">Set automatically when you mark a task complete.</div></div>
       </div>
       <div id="tf-errors"></div>
     </div>
@@ -282,9 +280,10 @@ function readTaskForm(base) {
   t.actualHours = $("#tf-act").value === "" ? null : Number($("#tf-act").value);
   t.progress = Number($("#tf-prog").value);
   t.tags = $("#tf-tags").value.split(",").map(s => s.trim()).filter(Boolean);
-  const cd = $("#tf-completed").value;
-  if (t.status === "COMPLETED") { t.progress = 100; t.completedAt = cd ? cd + "T12:00:00.000Z" : nowISO(); }
-  else if (cd) t.completedAt = cd + "T12:00:00.000Z";
+  // Completion date is set automatically, not typed — keep it when re-saving
+  // an already-completed task, stamp it fresh the moment it's marked
+  // complete, and clear it if reopened.
+  if (t.status === "COMPLETED") { t.progress = 100; t.completedAt = t.completedAt || nowISO(); }
   else t.completedAt = null;
   if (t.status !== "BLOCKED" && t.blocker && !t.blocker.resolvedAt) t.blocker = null;
   return t;

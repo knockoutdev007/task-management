@@ -28,6 +28,15 @@ CREATE TABLE IF NOT EXISTS employees (
   manager_id           VARCHAR(64),
   capacity_hours       INT NOT NULL DEFAULT 40,
   color                VARCHAR(16) NOT NULL DEFAULT '#0E7C86',
+  -- JSON array of TEAM_LEAD_CAPABILITIES ids (src/domain.js) — only meaningful
+  -- when role = 'teamlead'; a manager picks which of the team-lead powers this
+  -- specific person actually has. Ignored for 'manager' (already has everything)
+  -- and 'employee' (has none).
+  capabilities         TEXT NOT NULL DEFAULT '[]',
+  -- JSON array of "deptId|teamId" strings — extra teams a manager has put this
+  -- team lead in charge of, beyond the one they personally belong to
+  -- (department_id/team_id above). Only meaningful when role = 'teamlead'.
+  managed_teams        TEXT NOT NULL DEFAULT '[]',
   active               TINYINT(1) NOT NULL DEFAULT 1,
   last_login_at        VARCHAR(32),
   created_at           VARCHAR(32) NOT NULL,

@@ -97,9 +97,9 @@ function goodVibesRotationModal() {
   // pool) stays a real manager's call (server mirror: src/routes/goodvibes.js).
   const teamLeadOnly = isTeamLead() && !isManager();
   const todaysEmp = today ? emp(today.employeeId) : null;
-  const todayInMyTeam = !teamLeadOnly || (todaysEmp && sameTeamAs(todaysEmp));
+  const todayInMyTeam = !teamLeadOnly || (todaysEmp && inManagedScope(todaysEmp));
   const activeEmployees = (teamLeadOnly ? visibleEmployees() : S.employees).filter(e => e.active !== false);
-  const todayLocked = !today || today.post || (teamLeadOnly && !todayInMyTeam);
+  const todayLocked = !today || today.post || (teamLeadOnly && (!hasCapability("goodvibes") || !todayInMyTeam));
   return `<div class="modal wide" role="dialog" aria-modal="true" aria-label="Manage rotation">
     <div class="dh"><h2>Manage the rotation</h2><div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>
     <div class="db">
@@ -112,6 +112,7 @@ function goodVibesRotationModal() {
           <button class="btn sm" data-gvskip ${todayLocked ? "disabled" : ""}>Skip today</button>
         </div>
         ${today.post ? `<div class="hlp" style="width:100%">Already posted today — can't be changed.</div>`
+          : teamLeadOnly && !hasCapability("goodvibes") ? `<div class="hlp" style="width:100%">You don't have the Good Vibes Wall capability.</div>`
           : teamLeadOnly && !todayInMyTeam ? `<div class="hlp" style="width:100%">It's not someone on your team's turn today.</div>` : ""}
       </div></div>` : `<div class="empty" style="padding:14px">Today isn't a working day.</div>`}
 
@@ -162,8 +163,8 @@ function progressModal(t) {
       </div>
       <div class="frow">
         <div class="field"><label for="pg-exp">Expected completion</label><input class="inp" type="date" id="pg-exp" value="${esc(t.expectedCompletion || "")}"></div>
-        <div class="field"><label for="pg-due">Due date</label><input class="inp" type="date" id="pg-due" value="${esc(t.dueDate || "")}" ${(isManager() || (isTeamLead() && sameTeamAs(t))) ? "" : "disabled"}>
-          ${(isManager() || (isTeamLead() && sameTeamAs(t))) ? "" : `<div class="hlp">Only a manager can move a deadline.</div>`}</div>
+        <div class="field"><label for="pg-due">Due date</label><input class="inp" type="date" id="pg-due" value="${esc(t.dueDate || "")}" ${(isManager() || (hasCapability("tasks") && inManagedScope(t))) ? "" : "disabled"}>
+          ${(isManager() || (hasCapability("tasks") && inManagedScope(t))) ? "" : `<div class="hlp">Only a manager can move a deadline.</div>`}</div>
       </div>
       <div class="field"><label for="pg-note">What changed? (posted as a comment)</label>
         <textarea class="inp" id="pg-note" rows="2" placeholder="Optional but useful — this is what stops the manager asking."></textarea></div>
@@ -203,6 +204,22 @@ function employeeModal(e) {
         <div class="field"><label for="ef-cap">Weekly capacity (hours)</label><input class="inp" type="number" min="1" max="80" id="ef-cap" value="${e.capacityHours || 40}"></div>
       </div>
       <label style="display:flex;gap:8px;align-items:center;font-size:13px${restricted ? ";opacity:.55" : ""}"><input type="checkbox" id="ef-active" ${e.active !== false ? "checked" : ""} ${restricted ? "disabled" : ""}>Active — include in workload and dashboards</label>
+      ${restricted ? "" : `<div id="ef-caps-wrap" ${e.role === "teamlead" ? "" : "hidden"}>
+        <div class="field"><span class="lbl">Teams they manage</span>
+          <div style="display:grid;gap:5px;margin-top:4px">
+            ${teams.filter(x => !(x.deptId === e.departmentId && x.id === e.teamId)).map(x => `<label style="display:flex;gap:8px;align-items:center;font-size:12.5px">
+              <input type="checkbox" data-mteam="${esc(x.deptId)}|${esc(x.id)}" ${(e.managedTeams || []).includes(`${x.deptId}|${x.id}`) ? "checked" : ""}>${esc(x.deptName)} / ${esc(x.name)}</label>`).join("") || `<span class="hlp">No other teams exist yet.</span>`}
+          </div>
+          <div class="hlp">Their own team (set above) is always included — check any extra teams they should manage too.</div>
+        </div>
+        <div class="field"><span class="lbl">Team Lead capabilities</span>
+          <div style="display:grid;gap:5px;margin-top:4px">
+            ${TEAM_LEAD_CAPABILITIES.map(c => `<label style="display:flex;gap:8px;align-items:center;font-size:12.5px">
+              <input type="checkbox" data-cap="${esc(c.id)}" ${(e.capabilities || []).includes(c.id) ? "checked" : ""}>${esc(c.label)}</label>`).join("")}
+          </div>
+          <div class="hlp">Apply across every team they manage. Only applies while their role is Team Lead — anything left unchecked is simply off for them.</div>
+        </div>
+      </div>`}
     </div>
     <div class="df">
       ${isNew ? `<span class="hlp">They'll get a temporary password to sign in with.</span>`

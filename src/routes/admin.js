@@ -1,7 +1,7 @@
 /** People, projects, configuration and daily updates. */
 import { randomUUID } from "node:crypto";
 import * as store from "../db.js";
-import { isManager, isTeamLead, sameTeam } from "../domain.js";
+import { isManager, isTeamLead, inManagedScope, hasCapability, TEAM_LEAD_CAPABILITIES } from "../domain.js";
 import { hashPassword, randomPassword } from "../auth.js";
 import { broadcast } from "../events.js";
 import { wrap } from "../wrap.js";
@@ -10,17 +10,19 @@ const initialsOf = n => String(n || "?").trim().split(/\s+/).slice(0, 2).map(w =
 const PALETTE = ["#0E7C86","#2A5FA0","#6E42A8","#A85708","#16794A","#B8342A","#55708F","#8A5A2B","#3E7C5A","#7A4470"];
 const colorFor = id => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; };
 const VALID_ROLES = new Set(["manager", "teamlead", "employee"]);
+const VALID_CAPABILITIES = new Set(TEAM_LEAD_CAPABILITIES.map(c => c.id));
 
 export function mountAdmin(app, requireUser, requireManager, requireManagerOrTeamLead) {
 
   /* ---------------------------------------------------------- employees */
   app.get("/api/employees", requireUser, wrap(async (_req, res) => res.json({ employees: await store.listEmployees() })));
 
-  // A team lead may edit an existing person on their own team — name, title,
-  // capacity, color only. Role, active status, username, and which
-  // department/team/manager someone belongs to stay a real manager's call,
-  // so a team lead can't promote themselves, deactivate someone, or move
-  // people between teams.
+  // A team lead with the "team" capability may edit an existing person on
+  // any team they manage — name, title, capacity, color only. Role, active
+  // status, username, capabilities/managed teams and which department/team/
+  // manager someone belongs to stay a real manager's call, so a team lead
+  // can't promote themselves, deactivate someone, grant themselves more
+  // capabilities or teams, or move people between teams.
   app.put("/api/employees/:id", requireUser, requireManagerOrTeamLead, wrap(async (req, res) => {
     const b = req.body || {};
     const name = String(b.name || "").trim();
@@ -28,8 +30,9 @@ export function mountAdmin(app, requireUser, requireManager, requireManagerOrTea
     const existing = await store.getEmployee(req.params.id);
     const teamLeadEditing = isTeamLead(req.user) && !isManager(req.user);
     if (teamLeadEditing) {
+      if (!hasCapability(req.user, "team")) return res.status(403).json({ error: "You don't have the Team capability." });
       if (!existing) return res.status(403).json({ error: "Team leads can't add new people." });
-      if (!sameTeam(req.user, existing)) return res.status(403).json({ error: "You can only edit people on your own team." });
+      if (!inManagedScope(req.user, existing)) return res.status(403).json({ error: "You can only edit people on a team you manage." });
     }
     const requested = String(b.username || "").trim().toLowerCase() || store.slugifyName(name);
     const clash = await store.getEmployeeByUsername(requested);
@@ -41,6 +44,13 @@ export function mountAdmin(app, requireUser, requireManager, requireManagerOrTea
       if (managers <= 1) return res.status(409).json({ error: "This is the only active manager — promote someone else first." });
     }
 
+    const capabilities = Array.isArray(b.capabilities) ? b.capabilities.filter(c => VALID_CAPABILITIES.has(c)) : [];
+    let managedTeams = [];
+    if (!teamLeadEditing && Array.isArray(b.managedTeams)) {
+      const cfg = await store.getConfig();
+      const validKeys = new Set(cfg.departments.flatMap(d => (d.teams || []).map(t => `${d.id}|${t.id}`)));
+      managedTeams = b.managedTeams.filter(k => validKeys.has(k));
+    }
     const saved = await store.upsertEmployee({
       id: req.params.id, name, initials: initialsOf(name),
       username: teamLeadEditing ? existing.username : username,
@@ -51,6 +61,8 @@ export function mountAdmin(app, requireUser, requireManager, requireManagerOrTea
       managerId: teamLeadEditing ? existing.managerId : (b.managerId || null),
       capacityHours: Number(b.capacityHours) || 40,
       color: b.color || (existing && existing.color) || colorFor(req.params.id),
+      capabilities: teamLeadEditing ? (existing.capabilities || []) : capabilities,
+      managedTeams: teamLeadEditing ? (existing.managedTeams || []) : managedTeams,
       active: teamLeadEditing ? existing.active : (b.active !== false)
     });
 

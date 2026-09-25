@@ -62,6 +62,7 @@ async function applySchema() {
     await conn.query(sql);
     await migrateTaskBoardColumns(conn);
     await migrateEmployeeRoleCheck(conn);
+    await migrateEmployeeCapabilitiesColumn(conn);
   } finally { await conn.end(); }
 }
 
@@ -110,6 +111,18 @@ async function migrateEmployeeRoleCheck(conn) {
     await conn.query("ALTER TABLE employees MODIFY COLUMN role VARCHAR(16) NOT NULL DEFAULT 'employee'");
     await conn.query("ALTER TABLE employees ADD CONSTRAINT `role` CHECK (role IN ('manager','employee','teamlead'))");
   }
+}
+
+/** Older databases predate the per-team-lead capability picker and/or the
+ *  multi-team "managed_teams" extension — add whichever column CREATE TABLE
+ *  IF NOT EXISTS was a no-op against on an existing table. */
+async function migrateEmployeeCapabilitiesColumn(conn) {
+  const [cols] = await conn.query(
+    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'employees'"
+  );
+  const names = new Set(cols.map(c => c.COLUMN_NAME));
+  if (!names.has("capabilities")) await conn.query("ALTER TABLE employees ADD COLUMN capabilities TEXT NOT NULL DEFAULT '[]'");
+  if (!names.has("managed_teams")) await conn.query("ALTER TABLE employees ADD COLUMN managed_teams TEXT NOT NULL DEFAULT '[]'");
 }
 
 /** Every exported function funnels through this — ensures the pool exists and
@@ -195,6 +208,8 @@ const employeeOut = r => r && ({
   role: r.role, title: r.title,
   departmentId: r.department_id, teamId: r.team_id, managerId: r.manager_id,
   capacityHours: r.capacity_hours, color: r.color,
+  capabilities: J(r.capabilities, []),
+  managedTeams: J(r.managed_teams, []),
   active: !!r.active,
   mustChangePassword: !!r.must_change_password,
   hasPassword: !!r.password_hash,
@@ -248,22 +263,27 @@ export async function upsertEmployee(e) {
   const t = now();
   const [existingRows] = await exec("SELECT id, created_at FROM employees WHERE id = ?", [e.id]);
   const existing = existingRows[0];
+  const role = ["manager", "teamlead"].includes(e.role) ? e.role : "employee";
+  // Capabilities/managed teams only mean anything for a team lead — clear
+  // them on anyone else so a later re-promotion never resurrects a stale grant.
+  const capabilities = role === "teamlead" ? JSON.stringify(Array.isArray(e.capabilities) ? e.capabilities : []) : "[]";
+  const managedTeams = role === "teamlead" ? JSON.stringify(Array.isArray(e.managedTeams) ? e.managedTeams : []) : "[]";
   await exec(`
     INSERT INTO employees (id, name, initials, username, role, title, department_id, team_id,
-                           manager_id, capacity_hours, color, active, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           manager_id, capacity_hours, color, capabilities, managed_teams, active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       name = VALUES(name), initials = VALUES(initials), username = VALUES(username),
       role = VALUES(role), title = VALUES(title), department_id = VALUES(department_id),
       team_id = VALUES(team_id), manager_id = VALUES(manager_id),
-      capacity_hours = VALUES(capacity_hours), color = VALUES(color),
-      active = VALUES(active), updated_at = VALUES(updated_at)
+      capacity_hours = VALUES(capacity_hours), color = VALUES(color), capabilities = VALUES(capabilities),
+      managed_teams = VALUES(managed_teams), active = VALUES(active), updated_at = VALUES(updated_at)
   `, [
     e.id, e.name, e.initials || "", e.username,
-    ["manager", "teamlead"].includes(e.role) ? e.role : "employee", e.title || "",
+    role, e.title || "",
     e.departmentId || "", e.teamId || "",
     e.managerId || null, e.capacityHours || 40,
-    e.color || "#0E7C86", e.active === false ? 0 : 1,
+    e.color || "#0E7C86", capabilities, managedTeams, e.active === false ? 0 : 1,
     existing ? existing.created_at : t, t
   ]);
   return getEmployee(e.id);

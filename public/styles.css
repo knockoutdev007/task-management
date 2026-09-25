@@ -425,6 +425,10 @@ table.t tr.grp-row:hover td { background: var(--surface-2); }
 .p-LOW      { background: var(--low-soft); color: var(--low); border-color: var(--line); }
 .p-CRITICAL::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--crit); box-shadow: 0 0 0 2px color-mix(in srgb, var(--crit) 25%, transparent); }
 
+/* Team Lead role pill — the app's own accent/brand color, so it reads as a
+   highlighted "in-between" role rather than reusing Manager's or Employee's. */
+.p-TEAMLEAD { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); font-weight: 700; }
+
 /* Good Vibes Wall categories — reuse the same tokens as the priority pills
    above, picked for their hue association rather than their usual severity
    meaning (e.g. APPRECIATION borrows the "critical" red purely as a warm

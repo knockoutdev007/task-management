@@ -18,7 +18,7 @@ function viewGoodVibes() {
 
   return `
   <div class="ph"><div><h1>Good Vibes Wall</h1><div class="sub">One person shares something good each working day.</div></div>
-    ${isManagerOrTeamLead() ? `<div class="sp"><button class="btn" data-gvmanage>${icon("cog")}Manage rotation</button></div>` : ""}</div>
+    ${(isManager() || hasCapability("goodvibes")) ? `<div class="sp"><button class="btn" data-gvmanage>${icon("cog")}Manage rotation</button></div>` : ""}</div>
 
   ${gvTodayPanel(today, myTurn)}
 
