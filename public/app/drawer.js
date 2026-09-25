@@ -197,7 +197,7 @@ function drawerResources(t) {
 /* ------------------------------------------------------------- task form */
 function taskForm(existing, presetAssignee) {
   const t = existing || {
-    id: nextTaskId(), title: "", description: "", assigneeId: presetAssignee || (isManager() ? "" : meId()),
+    id: nextTaskId(), title: "", description: "", assigneeId: presetAssignee || (isManagerOrTeamLead() ? "" : meId()),
     createdById: meId(), departmentId: "", teamId: "", projectId: "", category: "",
     priority: "MEDIUM", status: "NOT_STARTED", progress: 0,
     createdAt: nowISO(), startDate: todayISO(), dueDate: iso(addDays(new Date(), cfg().defaultDueDays)),
@@ -216,10 +216,10 @@ function taskForm(existing, presetAssignee) {
         <textarea class="inp" id="tf-desc" rows="3" placeholder="Detail, acceptance criteria, links to context.">${esc(t.description || "")}</textarea></div>
       <div class="frow f3">
         <div class="field"><label for="tf-assignee">Assigned to</label>
-          <select class="inp" id="tf-assignee" ${isManager() ? "" : "disabled"}>
+          <select class="inp" id="tf-assignee" ${isManagerOrTeamLead() ? "" : "disabled"}>
             <option value="">Unassigned</option>
-            ${S.employees.map(e => `<option value="${esc(e.id)}" ${t.assigneeId === e.id ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>
-          ${isManager() ? "" : `<div class="hlp">Only a manager can assign work to someone else.</div>`}</div>
+            ${(isTeamLead() && !isManager() ? visibleEmployees() : S.employees).map(e => `<option value="${esc(e.id)}" ${t.assigneeId === e.id ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>
+          ${isManagerOrTeamLead() ? (isTeamLead() && !isManager() ? `<div class="hlp">Only your own team is shown.</div>` : "") : `<div class="hlp">Only a manager can assign work to someone else.</div>`}</div>
         <div class="field"><label for="tf-project">Project</label>
           <select class="inp" id="tf-project"><option value="">None</option>
             ${S.projects.map(p => `<option value="${esc(p.id)}" ${t.projectId === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>

@@ -26,7 +26,7 @@ function sortTeamRows(list) {
 }
 function viewTeam() {
   if (S.empDetail) return viewEmployee(S.empDetail);
-  const people = S.employees.slice().sort(by(e => e.name));
+  const people = visibleEmployees().slice().sort(by(e => e.name));
   const TF = S.teamFilters;
   const loads = people.map(e => ({
     e, w: workload(e.id), cur: currentTasks(e.id, 1)[0],
@@ -41,7 +41,7 @@ function viewTeam() {
   const filtered = TF.priority || TF.status;
   return `
   <div class="ph"><div><h1>Team</h1><div class="sub">${filtered ? `${shown.length} of ${people.length} people match the filter` : `${people.length} people across ${Object.keys(byDept).length} department${Object.keys(byDept).length === 1 ? "" : "s"}`}.</div></div>
-    <div class="sp"><button class="btn" data-export="team">${icon("dl")}Export</button><button class="btn pri" data-newemp>${icon("plus")}Add person</button></div></div>
+    <div class="sp"><button class="btn" data-export="team">${icon("dl")}Export</button>${isManager() ? `<button class="btn pri" data-newemp>${icon("plus")}Add person</button>` : ""}</div></div>
   ${priorityStatusFilterBar("team", TF, "clearteamfilters", `<span class="fcount">${shown.length} shown</span>`)}
   ${shown.length ? Object.entries(byDept).map(([dept, rows]) => `
     <section class="panel" style="margin-bottom:14px">
@@ -102,7 +102,7 @@ function viewEmployee(id) {
       <div><h1>${esc(e.name)}</h1><div class="sub">${esc(e.title || "")} · ${esc(deptName(e.departmentId))} / ${esc(teamName(e.departmentId, e.teamId))} · ${esc(e.username || "")}</div></div></div>
     <div class="sp"><button class="btn" data-emp="">← Team</button>
       <button class="btn" data-newfor="${esc(e.id)}">${icon("plus")}Assign task</button>
-      ${canAdmin() ? `<button class="btn" data-editemp="${esc(e.id)}">${icon("edit")}Edit</button>` : ""}</div>
+      ${canEditPerson(e) ? `<button class="btn" data-editemp="${esc(e.id)}">${icon("edit")}Edit</button>` : ""}</div>
   </div>
   ${kpiStrip([
     { label: "Active", value: w.active, tone: "acc" },
@@ -227,8 +227,9 @@ function viewDaily() {
   const inprog = ts.filter(t => t.status === "IN_PROGRESS").sort((a, b) => prio(b.priority).weight - prio(a.priority).weight);
   const attn = ts.filter(t => isActive(t) && attention(t).length).sort((a, b) => attnScore(b) - attnScore(a));
   const blockers = ts.filter(t => isActive(t) && flags(t).blocked);
-  const todaysUpdates = S.employees.map(e => ({ e, u: myUpdates(e.id).find(x => x.date === today) })).filter(x => x.u);
-  const missing = S.employees.filter(e => e.active !== false && !myUpdates(e.id).some(x => x.date === today) && workload(e.id).active > 0);
+  const people = visibleEmployees();
+  const todaysUpdates = people.map(e => ({ e, u: myUpdates(e.id).find(x => x.date === today) })).filter(x => x.u);
+  const missing = people.filter(e => e.active !== false && !myUpdates(e.id).some(x => x.date === today) && workload(e.id).active > 0);
   return `
   <div class="ph"><div><h1>Daily team summary</h1>
     <div class="sub">${DOW[d.getDay()]} ${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} — generated from the task records, not typed by anyone.</div></div>
@@ -251,7 +252,7 @@ function viewDaily() {
           ${av(emp(t.assigneeId), "sm")}<span style="flex:1"><span class="t">${esc(empName(t.assigneeId))} — ${taskLink(t)}</span>
           <span class="m">due ${esc(fmtDate(t.dueDate))} · updated ${esc(fmtAgo(t.updatedAt))}</span></span>${pBar(t)}</div>`).join("") || emptyState("Nothing in progress", "")}</div></section>
 
-      <section class="panel"><div class="panel-h"><h2>Today's check-ins</h2><span class="hint">${todaysUpdates.length} of ${S.employees.length}</span></div>
+      <section class="panel"><div class="panel-h"><h2>Today's check-ins</h2><span class="hint">${todaysUpdates.length} of ${people.length}</span></div>
         <div class="panel-b" style="display:grid;gap:10px">
           ${todaysUpdates.map(({ e, u }) => `<div style="border-left:2px solid ${e.color || avColor(e.id)};padding-left:9px">
             <strong style="font-size:12.5px">${esc(e.name)}</strong>
@@ -279,7 +280,7 @@ function viewDayBoard() {
   const offset = Math.min(0, S.dayBoardOffset || 0);
   const isToday = offset === 0;
   const date = iso(addDays(new Date(), offset));
-  const allPeople = S.employees.filter(e => e.active !== false).slice().sort(by(e => e.name));
+  const allPeople = visibleEmployees().filter(e => e.active !== false).slice().sort(by(e => e.name));
 
   const countFor = id => allPeople.filter(e => {
     if (!id) return true;

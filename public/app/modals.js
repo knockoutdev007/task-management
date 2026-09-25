@@ -68,6 +68,68 @@ function taskBoardModal() {
       <div class="sp"><button class="btn" data-close>Cancel</button><button class="btn pri" data-savetboard>Create task</button></div></div>
   </div>`;
 }
+/** Share Today's Post — "share" here means publish to the wall, not an
+ *  external share sheet (there's no Web Share API use in this app). */
+function goodVibesPostModal() {
+  return `<div class="modal" role="dialog" aria-modal="true" aria-label="Share today's post">
+    <div class="dh"><h2>Share today's post</h2><div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>
+    <div class="db">
+      <div class="hlp">Posting as <strong>${esc(S.me.name)}</strong></div>
+      <div class="field"><label for="gv-category">Category</label>
+        <select class="inp" id="gv-category">${GOOD_VIBES_CATEGORIES.map(c => `<option value="${esc(c.id)}">${c.emoji} ${esc(c.label)}</option>`).join("")}</select></div>
+      <div class="field"><label for="gv-body">What's on your mind?</label>
+        <textarea class="inp" id="gv-body" rows="4" maxlength="2000" placeholder="Share a good thought, a win, something funny — anything positive."></textarea></div>
+      <div id="gv-err"></div>
+    </div>
+    <div class="df"><span></span>
+      <div class="sp"><button class="btn" data-close>Cancel</button><button class="btn pri" data-savegvpost>Post to the wall</button></div></div>
+  </div>`;
+}
+/** Admin rotation management — reorder (move up/down, saves immediately,
+ *  same "no separate save step" convention as Settings' data-wd), skip or
+ *  reassign today. No drag-and-drop here on purpose — avoids a third global
+ *  DnD listener trio alongside the Board's and Task Board's own (events.js). */
+function goodVibesRotationModal() {
+  const rotation = S.goodVibes.rotation || [];
+  const today = S.goodVibes.today;
+  // A team lead only acts on today's turn, and only when it's someone on
+  // their own team — the shared rotation sequence itself (order, skip target
+  // pool) stays a real manager's call (server mirror: src/routes/goodvibes.js).
+  const teamLeadOnly = isTeamLead() && !isManager();
+  const todaysEmp = today ? emp(today.employeeId) : null;
+  const todayInMyTeam = !teamLeadOnly || (todaysEmp && sameTeamAs(todaysEmp));
+  const activeEmployees = (teamLeadOnly ? visibleEmployees() : S.employees).filter(e => e.active !== false);
+  const todayLocked = !today || today.post || (teamLeadOnly && !todayInMyTeam);
+  return `<div class="modal wide" role="dialog" aria-modal="true" aria-label="Manage rotation">
+    <div class="dh"><h2>Manage the rotation</h2><div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>
+    <div class="db">
+      ${today ? `<div class="panel"><div class="panel-h"><h2>Today</h2></div><div class="panel-b" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span class="cellname">${av(emp(today.employeeId), "sm")}<span class="tx">${esc(empName(today.employeeId))}</span></span>
+        <span class="tag">${esc(today.status)}</span>
+        <div class="sp" style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select class="inp" id="gv-reassign-select" style="max-width:180px" ${todayLocked ? "disabled" : ""}>${activeEmployees.map(e => `<option value="${esc(e.id)}" ${e.id === today.employeeId ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>
+          <button class="btn sm" data-gvsavereassign ${todayLocked ? "disabled" : ""}>Reassign</button>
+          <button class="btn sm" data-gvskip ${todayLocked ? "disabled" : ""}>Skip today</button>
+        </div>
+        ${today.post ? `<div class="hlp" style="width:100%">Already posted today — can't be changed.</div>`
+          : teamLeadOnly && !todayInMyTeam ? `<div class="hlp" style="width:100%">It's not someone on your team's turn today.</div>` : ""}
+      </div></div>` : `<div class="empty" style="padding:14px">Today isn't a working day.</div>`}
+
+      ${teamLeadOnly ? "" : `<div class="panel"><div class="panel-h"><h2>Order</h2></div>
+        <div class="panel-b" style="display:grid;gap:6px">
+          ${rotation.map((r, i) => `<div class="sr-item"${r.active ? "" : ' style="opacity:.55"'}>
+            <span class="cellname">${av(emp(r.employeeId), "sm")}<span class="tx">${esc(r.name)}</span></span>
+            ${r.active ? "" : `<span class="tag">inactive — skipped</span>`}
+            <span class="sp" style="margin-left:auto;display:flex;gap:4px">
+              <button class="btn sm" data-gvmoveup="${esc(r.employeeId)}" ${i === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
+              <button class="btn sm" data-gvmovedown="${esc(r.employeeId)}" ${i === rotation.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
+            </span>
+          </div>`).join("") || `<div class="empty">No one in the rotation yet.</div>`}
+        </div></div>`}
+    </div>
+    <div class="df"><span></span><div class="sp"><button class="btn pri" data-close>Done</button></div></div>
+  </div>`;
+}
 function dependencyModal(t) {
   return `<div class="modal" role="dialog" aria-modal="true" aria-label="Add dependency">
     <div class="dh"><h2>Add a dependency</h2><div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>
@@ -100,8 +162,8 @@ function progressModal(t) {
       </div>
       <div class="frow">
         <div class="field"><label for="pg-exp">Expected completion</label><input class="inp" type="date" id="pg-exp" value="${esc(t.expectedCompletion || "")}"></div>
-        <div class="field"><label for="pg-due">Due date</label><input class="inp" type="date" id="pg-due" value="${esc(t.dueDate || "")}" ${isManager() ? "" : "disabled"}>
-          ${isManager() ? "" : `<div class="hlp">Only a manager can move a deadline.</div>`}</div>
+        <div class="field"><label for="pg-due">Due date</label><input class="inp" type="date" id="pg-due" value="${esc(t.dueDate || "")}" ${(isManager() || (isTeamLead() && sameTeamAs(t))) ? "" : "disabled"}>
+          ${(isManager() || (isTeamLead() && sameTeamAs(t))) ? "" : `<div class="hlp">Only a manager can move a deadline.</div>`}</div>
       </div>
       <div class="field"><label for="pg-note">What changed? (posted as a comment)</label>
         <textarea class="inp" id="pg-note" rows="2" placeholder="Optional but useful — this is what stops the manager asking."></textarea></div>
@@ -113,30 +175,38 @@ function employeeModal(e) {
   const isNew = !e;
   e = e || { id: uid("emp"), name: "", username: "", role: "employee", title: "", departmentId: cfg().departments[0] ? cfg().departments[0].id : "", teamId: "", capacityHours: 40, active: true };
   const teams = allTeams();
+  // A team lead editing an existing teammate: name/title/capacity only —
+  // role, active status, User ID and team assignment stay a manager's call
+  // (server mirror: src/routes/admin.js PUT /employees/:id).
+  const restricted = !isNew && isTeamLead() && !isManager();
   return `<div class="modal" role="dialog" aria-modal="true" aria-label="${isNew ? "Add person" : "Edit person"}">
     <div class="dh"><h2>${isNew ? "Add a person" : "Edit " + esc(e.name)}</h2><div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>
     <div class="db">
       <div class="frow">
         <div class="field"><label for="ef-name">Full name</label><input class="inp" id="ef-name" value="${esc(e.name)}"></div>
-        <div class="field"><label for="ef-username">User ID</label><input class="inp" type="text" id="ef-username" value="${esc(e.username || "")}" required ${isNew ? "" : 'data-touched="1"'}>
-          <div class="hlp">This is how they sign in.</div></div>
+        <div class="field"><label for="ef-username">User ID</label><input class="inp" type="text" id="ef-username" value="${esc(e.username || "")}" required ${isNew ? "" : 'data-touched="1"'} ${restricted ? "disabled" : ""}>
+          <div class="hlp">${restricted ? "Only a manager can change this." : "This is how they sign in."}</div></div>
       </div>
       <div class="frow">
         <div class="field"><label for="ef-title">Job title</label><input class="inp" id="ef-title" value="${esc(e.title || "")}"></div>
         <div class="field"><label for="ef-role">Role in this tool</label>
-          <select class="inp" id="ef-role"><option value="employee" ${e.role === "employee" ? "selected" : ""}>Employee — own work only</option>
-            <option value="manager" ${e.role === "manager" ? "selected" : ""}>Manager — full team access</option></select></div>
+          <select class="inp" id="ef-role" ${restricted ? "disabled" : ""}>
+            <option value="employee" ${e.role === "employee" ? "selected" : ""}>Employee — own work only</option>
+            <option value="teamlead" ${e.role === "teamlead" ? "selected" : ""}>Team Lead — manages their own team</option>
+            <option value="manager" ${e.role === "manager" ? "selected" : ""}>Manager — full team access</option></select>
+          ${restricted ? `<div class="hlp">Only a manager can change this.</div>` : ""}</div>
       </div>
       <div class="frow">
         <div class="field"><label for="ef-team">Department / team</label>
-          <select class="inp" id="ef-team">${teams.map(x => `<option value="${esc(x.deptId)}|${esc(x.id)}" ${e.departmentId === x.deptId && e.teamId === x.id ? "selected" : ""}>${esc(x.deptName)} / ${esc(x.name)}</option>`).join("")}</select></div>
+          <select class="inp" id="ef-team" ${restricted ? "disabled" : ""}>${teams.map(x => `<option value="${esc(x.deptId)}|${esc(x.id)}" ${e.departmentId === x.deptId && e.teamId === x.id ? "selected" : ""}>${esc(x.deptName)} / ${esc(x.name)}</option>`).join("")}</select>
+          ${restricted ? `<div class="hlp">Only a manager can move someone between teams.</div>` : ""}</div>
         <div class="field"><label for="ef-cap">Weekly capacity (hours)</label><input class="inp" type="number" min="1" max="80" id="ef-cap" value="${e.capacityHours || 40}"></div>
       </div>
-      <label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="ef-active" ${e.active !== false ? "checked" : ""}>Active — include in workload and dashboards</label>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px${restricted ? ";opacity:.55" : ""}"><input type="checkbox" id="ef-active" ${e.active !== false ? "checked" : ""} ${restricted ? "disabled" : ""}>Active — include in workload and dashboards</label>
     </div>
     <div class="df">
       ${isNew ? `<span class="hlp">They'll get a temporary password to sign in with.</span>`
-              : `<button class="btn" data-resetpw="${esc(e.id)}">Reset password</button>`}
+              : restricted ? `<span></span>` : `<button class="btn" data-resetpw="${esc(e.id)}">Reset password</button>`}
       <div class="sp"><button class="btn" data-close>Cancel</button><button class="btn pri" data-saveemp="${esc(e.id)}" data-isnew="${isNew}">${isNew ? "Add person" : "Save"}</button></div></div>
   </div>`;
 }

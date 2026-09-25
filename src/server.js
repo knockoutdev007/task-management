@@ -7,13 +7,14 @@
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { attachUser, requireUser, requireManager, mountAuth } from "./auth.js";
+import { attachUser, requireUser, requireManager, requireManagerOrTeamLead, mountAuth } from "./auth.js";
 import { mountEvents } from "./events.js";
 import { mountTasks } from "./routes/tasks.js";
 import { mountAdmin } from "./routes/admin.js";
 import { mountAttachments } from "./routes/attachments.js";
 import { mountBreaks } from "./routes/breaks.js";
 import { mountNotifications } from "./routes/notifications.js";
+import { mountGoodVibes } from "./routes/goodvibes.js";
 import { listEmployees } from "./db.js";
 import { wrap } from "./wrap.js";
 
@@ -37,10 +38,11 @@ app.use(attachUser);
 mountAuth(app);
 mountEvents(app, requireUser);
 mountTasks(app, requireUser, requireManager);
-mountAdmin(app, requireUser, requireManager);
+mountAdmin(app, requireUser, requireManager, requireManagerOrTeamLead);
 mountAttachments(app, requireUser);
 mountBreaks(app, requireUser);
 mountNotifications(app, requireUser);
+mountGoodVibes(app, requireUser, requireManager, requireManagerOrTeamLead);
 
 app.get("/api/health", wrap(async (_req, res) => res.json({ ok: true, people: (await listEmployees()).length })));
 

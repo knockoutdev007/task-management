@@ -8,6 +8,12 @@ import { randomUUID } from "node:crypto";
 import { getConfig } from "./db.js";
 
 export const isManager = user => !!user && user.role === "manager";
+/** A team-scoped manager: same elevated powers as a manager, but only over
+ *  their own department+team's people and tasks — see the functions below
+ *  that check this alongside a team match, never on its own. */
+export const isTeamLead = user => !!user && user.role === "teamlead";
+export const isManagerOrTeamLead = user => isManager(user) || isTeamLead(user);
+export const sameTeam = (a, b) => !!a && !!b && a.departmentId === b.departmentId && a.teamId === b.teamId;
 
 const statusKind = (cfg, id) => (cfg.statuses.find(s => s.id === id) || { kind: "open" }).kind;
 export const isClosedStatus = (cfg, id) => statusKind(cfg, id) === "done";
@@ -24,21 +30,32 @@ export const breakType = id => BREAK_TYPES.find(t => t.id === id) || null;
 
 /* ------------------------------------------------------------ permissions */
 
-/** Who may change a task at all. Employees own their own work. */
+/** Who may change a task at all. Employees own their own work; a team lead
+ *  also owns every task already on their own team. */
 export function canEditTask(user, stored) {
   if (!user) return false;
   if (isManager(user)) return true;
+  if (isTeamLead(user) && stored && sameTeam(user, stored)) return true;
   if (!stored) return true;                              // creating their own
   return stored.assigneeId === user.id || stored.createdById === user.id;
 }
-/** Who may mark it done — the person doing the work, or a manager. */
+/** Who may mark it done — the person doing the work, a team lead for their
+ *  own team's tasks, or a manager. */
 export function canCompleteTask(user, stored) {
   if (!user) return false;
-  return isManager(user) || (stored && stored.assigneeId === user.id);
+  if (isManager(user)) return true;
+  if (isTeamLead(user) && stored && sameTeam(user, stored)) return true;
+  return !!(stored && stored.assigneeId === user.id);
 }
 
-/** Fields only a manager may set. Employees keep the stored value. */
+/** Fields only a manager may set. Employees keep the stored value. A team
+ *  lead is let through on assigneeId/dueDate specifically — see
+ *  applyFieldPermissions' `teamLeadCanManage` opt — everywhere else in this
+ *  list (departmentId/teamId) they're treated the same as an employee, since
+ *  reassigning across teams or altering the team a task belongs to stays a
+ *  real manager's call. */
 export const MANAGER_ONLY_FIELDS = ["assigneeId", "dueDate", "departmentId", "teamId"];
+const TEAM_LEAD_MANAGEABLE_FIELDS = new Set(["assigneeId", "dueDate"]);
 
 /* ------------------------------------------------------------- task board */
 
@@ -84,13 +101,21 @@ export function nextBoardPauseState({ wasRunning, isRunning, pausedAt, pausedMsT
  * Fold an incoming task onto the stored one, dropping anything this user is
  * not allowed to change. Returns the task to persist plus a list of fields
  * that were silently held back, so the API can tell the caller.
+ *
+ * `opts.teamLeadCanManage` is precomputed by the caller (writeTask, which has
+ * DB access to look up the target assignee) — true when this user is a team
+ * lead AND the task's assignee (existing or incoming) is on their own team.
+ * It's the one exception to MANAGER_ONLY_FIELDS: a team lead may still set
+ * assigneeId/dueDate within their own team, same as a manager would.
  */
-export function applyFieldPermissions(user, incoming, stored) {
+export function applyFieldPermissions(user, incoming, stored, opts = {}) {
   const out = { ...incoming };
   const denied = [];
+  const teamManage = !!opts.teamLeadCanManage;
   if (!stored) {
-    // On create, an employee may only assign work to themselves.
-    if (!isManager(user) && out.assigneeId && out.assigneeId !== user.id) {
+    // On create, an employee (or a team lead assigning outside their team)
+    // may only assign work to themselves.
+    if (!isManager(user) && !teamManage && out.assigneeId && out.assigneeId !== user.id) {
       out.assigneeId = user.id;
       denied.push("assigneeId");
     }
@@ -101,6 +126,7 @@ export function applyFieldPermissions(user, incoming, stored) {
   out.createdAt = stored.createdAt;
   if (!isManager(user)) {
     for (const f of MANAGER_ONLY_FIELDS) {
+      if (teamManage && TEAM_LEAD_MANAGEABLE_FIELDS.has(f)) continue;
       const a = stored[f] ?? null, b = out[f] ?? null;
       if (String(a) !== String(b)) { out[f] = stored[f]; denied.push(f); }
     }
@@ -293,4 +319,48 @@ export function mentionedEmployeeIds(text, employees) {
     if (match) found.add(match.id);
   }
   return [...found];
+}
+
+/* ---------------------------------------------------------- good vibes wall */
+
+/** Fixed post categories — deliberately not config-driven, same convention
+ *  as BREAK_TYPES/BOARD_CATEGORIES above. */
+export const GOOD_VIBES_CATEGORIES = [
+  { id: "THOUGHT",      label: "Good Thought", emoji: "💡" },
+  { id: "MOTIVATION",   label: "Motivation",   emoji: "🚀" },
+  { id: "FUNNY",        label: "Funny",        emoji: "😂" },
+  { id: "APPRECIATION", label: "Appreciation", emoji: "👏" },
+  { id: "WIN",          label: "Small Win",    emoji: "🌟" },
+  { id: "RANDOM",       label: "Random",       emoji: "🎲" }
+];
+
+/** Managing the rotation and moderating posts is a real manager-only action —
+ *  unlike canManageTaskBoard's still-open TODO above, this one is intentional. */
+export function canManageGoodVibes(user) { return isManager(user); }
+
+/** JS Date.getUTCDay() convention: 0=Sun...6=Sat, matching config.workingDays. */
+export function isWorkingDay(dateISO, workingDays) {
+  return (workingDays || []).includes(new Date(dateISO + "T00:00:00Z").getUTCDay());
+}
+
+/** Next person after `currentEmployeeId` in `order`, wrapping around. Falls
+ *  back to the front of the list if the current person isn't in it anymore
+ *  (e.g. deactivated mid-cycle). */
+export function nextInRotation(order, currentEmployeeId) {
+  if (!order || !order.length) return null;
+  const idx = order.indexOf(currentEmployeeId);
+  return order[(idx === -1 ? 0 : idx + 1) % order.length];
+}
+
+/** A read-only preview of the next `count` people in rotation after the
+ *  anchor — never persisted, so it always reflects the live order. */
+export function projectUpcoming(order, anchorEmployeeId, count) {
+  const out = [];
+  let cursor = anchorEmployeeId;
+  for (let i = 0; i < count; i++) {
+    cursor = nextInRotation(order, cursor);
+    if (cursor == null) break;
+    out.push(cursor);
+  }
+  return out;
 }

@@ -63,6 +63,7 @@ function absorb(d) {
   if (d.config) S.config = Object.assign(clone(DEFAULT_CONFIG), d.config);
   if (d.notifications) S.notifications = d.notifications;
   if (d.myNotifyPrefs) S.myNotifyPrefs = d.myNotifyPrefs;
+  if (d.goodVibes) S.goodVibes = Object.assign(S.goodVibes, d.goodVibes);
 }
 
 async function initData() {
@@ -106,7 +107,7 @@ function openStream() {
     // missed (src/events.js keeps no per-client backlog) - resync everything
     // rather than leave stale state until unrelated activity happens to
     // trigger the next broadcast.
-    await refresh(["tasks", "employees", "projects", "updates", "breaks", "config", "notifications"]);
+    await refresh(["tasks", "employees", "projects", "updates", "breaks", "config", "notifications", "goodvibes"]);
   };
   stream.onerror = () => {
     stream.close(); stream = null;
@@ -123,6 +124,7 @@ async function refresh(collections) {
   if (collections.includes("breaks"))    jobs.push(GET("/api/breaks").then(r => r.ok && (S.breaks = r.data.breaks)));
   if (collections.includes("config"))    jobs.push(GET("/api/config").then(r => r.ok && (S.config = Object.assign(clone(DEFAULT_CONFIG), r.data.config))));
   if (collections.includes("notifications")) jobs.push(GET("/api/notifications").then(r => r.ok && (S.notifications = r.data.notifications)));
+  if (collections.includes("goodvibes")) jobs.push(GET("/api/goodvibes/bootstrap").then(r => r.ok && absorb({ goodVibes: r.data.goodVibes })));
   await Promise.all(jobs);
   render();
 }
@@ -139,6 +141,7 @@ async function logout() {
   await POST("/api/auth/logout");
   if (stream) { stream.close(); stream = null; }
   S.me = null; S.tasks = []; S.employees = []; S.projects = []; S.updates = []; S.breaks = [];
+  S.goodVibes = { today: null, posts: [], upcoming: [], rotation: [] };
   closeLayer(); render();
 }
 async function changePassword(current, next) {
@@ -370,6 +373,80 @@ async function deleteAttachmentRemote(taskId, attId) {
   replaceTask(r.data.task); render(); return true;
 }
 
+/* ------------------------------------------------------- good vibes wall */
+async function postGoodVibes(category, body) {
+  const r = await POST("/api/goodvibes/posts", { category, body });
+  if (!r.ok) { toast(explain(r), true); return false; }
+  S.goodVibes.posts = [r.data.post, ...S.goodVibes.posts];
+  if (S.goodVibes.today) S.goodVibes.today = Object.assign({}, S.goodVibes.today, { post: r.data.post });
+  render();
+  return true;
+}
+async function toggleGoodVibesLike(postId) {
+  const p = S.goodVibes.posts.find(x => x.id === postId); if (!p) return;
+  const before = { likeCount: p.likeCount, likedByMe: p.likedByMe };
+  p.likedByMe = !p.likedByMe; p.likeCount += p.likedByMe ? 1 : -1;
+  render();
+  const r = await POST("/api/goodvibes/posts/" + postId + "/like");
+  if (!r.ok) { Object.assign(p, before); render(); toast(explain(r), true); return; }
+  p.likedByMe = r.data.liked; p.likeCount = r.data.likeCount;
+  render();
+}
+async function addGoodVibesComment(postId, body) {
+  const r = await POST("/api/goodvibes/posts/" + postId + "/comments", { body });
+  if (!r.ok) { toast(explain(r), true); return false; }
+  const p = S.goodVibes.posts.find(x => x.id === postId);
+  if (p) p.comments = (p.comments || []).concat([r.data.comment]);
+  render();
+  return true;
+}
+async function loadGoodVibesRotation() {
+  const r = await GET("/api/goodvibes/rotation");
+  if (!r.ok) { toast(explain(r), true); return false; }
+  S.goodVibes.rotation = r.data.rotation;
+  render();
+  return true;
+}
+async function saveGoodVibesRotation(employeeIds) {
+  const r = await PUT("/api/goodvibes/admin/rotation", { employeeIds });
+  if (!r.ok) { toast(explain(r), true); return false; }
+  S.goodVibes.rotation = r.data.rotation;
+  render();
+  return true;
+}
+async function skipGoodVibesToday() {
+  const r = await POST("/api/goodvibes/admin/skip");
+  if (!r.ok) { toast(explain(r), true); return false; }
+  await refresh(["goodvibes"]);
+  await loadGoodVibesRotation();
+  toast("Skipped — moved to the next person.");
+  return true;
+}
+async function reassignGoodVibesToday(employeeId) {
+  const r = await PUT("/api/goodvibes/admin/assignments/" + todayISO(), { employeeId });
+  if (!r.ok) { toast(explain(r), true); return false; }
+  await refresh(["goodvibes"]);
+  await loadGoodVibesRotation();
+  toast("Reassigned today's turn.");
+  return true;
+}
+async function hideGoodVibesPost(id) {
+  const r = await DEL("/api/goodvibes/admin/posts/" + id);
+  if (!r.ok) { toast(explain(r), true); return false; }
+  S.goodVibes.posts = S.goodVibes.posts.filter(p => p.id !== id);
+  if (S.goodVibes.today && S.goodVibes.today.post && S.goodVibes.today.post.id === id) S.goodVibes.today.post = null;
+  render();
+  return true;
+}
+async function hideGoodVibesComment(postId, commentId) {
+  const r = await DEL("/api/goodvibes/admin/comments/" + commentId);
+  if (!r.ok) { toast(explain(r), true); return false; }
+  const p = S.goodVibes.posts.find(x => x.id === postId);
+  if (p) p.comments = (p.comments || []).filter(c => c.id !== commentId);
+  render();
+  return true;
+}
+
 const myUpdates = id => (S.updates.find(u => u.id === id || u.employeeId === id) || {}).entries || [];
 const latestUpdate = id => { const e = myUpdates(id); return e.length ? e[e.length - 1] : null; };
 
@@ -400,13 +477,22 @@ function validateTask(t) {
 function canEdit(t) {
   if (!S.me) return false;
   if (isManager()) return true;
+  if (isTeamLead() && t.departmentId === S.me.departmentId && t.teamId === S.me.teamId) return true;
   return t.assigneeId === meId() || t.createdById === meId();
 }
 function canComplete(t) {
   if (!S.me) return false;
-  return isManager() || t.assigneeId === meId();
+  if (isManager()) return true;
+  if (isTeamLead() && t.departmentId === S.me.departmentId && t.teamId === S.me.teamId) return true;
+  return t.assigneeId === meId();
 }
 const canAdmin = () => isManager();
+/** A team lead may edit (not add/remove, not role/active) someone already
+ *  on their own team — server mirror: src/routes/admin.js's PUT /employees/:id. */
+function canEditPerson(e) {
+  if (!S.me || !e) return false;
+  return isManager() || (isTeamLead() && sameTeamAs(e));
+}
 // TODO: restrict to Managers — flip this to `return isManager();` (server mirror: src/domain.js canManageTaskBoard)
 function canManageTaskBoard() { return !!S.me; }
 

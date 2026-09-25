@@ -55,9 +55,11 @@ function personCell(id) {
 
 /* ---------------------------------------------------------------- filtering */
 function visibleTasks() {
-  // Employees see their own work plus anything they created; managers see all.
+  // Employees see their own work plus anything they created; a team lead
+  // sees their whole team's; managers see all.
   if (!S.me) return [];
   if (isManager()) return S.tasks;
+  if (isTeamLead()) return S.tasks.filter(t => t.departmentId === S.me.departmentId && t.teamId === S.me.teamId);
   return S.tasks.filter(t => t.assigneeId === meId() || t.createdById === meId());
 }
 function applyFilters(list, F) {
@@ -124,19 +126,20 @@ function sortTasks(list) {
    ========================================================================== */
 const VIEWS = {
   cc:        { label: "Overview",       icon: "grid",     roles: ["manager"] },
-  myday:     { label: "My Day",         icon: "sunrise",  roles: ["manager", "employee"] },
-  working:   { label: "Currently on",   icon: "users",    roles: ["manager"] },
+  myday:     { label: "My Day",         icon: "sunrise",  roles: ["manager", "employee", "teamlead"] },
+  working:   { label: "Currently on",   icon: "users",    roles: ["manager", "teamlead"] },
   attention: { label: "Requires attention", icon: "alert", roles: ["manager"] },
   managerboard: { label: "Managers Board", icon: "board", roles: ["manager"] },
-  board:     { label: "Board",          icon: "board",    roles: ["manager", "employee"] },
-  tasks:     { label: "All tasks",      icon: "list",     roles: ["manager", "employee"] },
-  team:      { label: "Team",           icon: "users",    roles: ["manager"] },
-  blockers:  { label: "Blockers",       icon: "ban",      roles: ["manager"] },
-  projects:  { label: "Projects",       icon: "folder",   roles: ["manager", "employee"] },
-  daily:     { label: "Daily summary",  icon: "inbox",    roles: ["manager"] },
-  dayboard:  { label: "Day plan board", icon: "board",    roles: ["manager"] },
-  update:    { label: "Daily update",   icon: "edit",     roles: ["manager", "employee"] },
+  board:     { label: "Board",          icon: "board",    roles: ["manager", "employee", "teamlead"] },
+  tasks:     { label: "All tasks",      icon: "list",     roles: ["manager", "employee", "teamlead"] },
+  team:      { label: "Team",           icon: "users",    roles: ["manager", "teamlead"] },
+  blockers:  { label: "Blockers",       icon: "ban",      roles: ["manager", "teamlead"] },
+  projects:  { label: "Projects",       icon: "folder",   roles: ["manager", "employee", "teamlead"] },
+  daily:     { label: "Daily summary",  icon: "inbox",    roles: ["manager", "teamlead"] },
+  dayboard:  { label: "Day plan board", icon: "board",    roles: ["manager", "teamlead"] },
+  update:    { label: "Daily update",   icon: "edit",     roles: ["manager", "employee", "teamlead"] },
   analytics: { label: "Analytics",      icon: "chart",    roles: ["manager"] },
+  goodvibes: { label: "Good Vibes Wall", icon: "heart",   roles: ["manager", "employee", "teamlead"] },
   settings:  { label: "Settings",       icon: "cog",      roles: ["manager"] }
 };
 const NAV_GROUPS = [
@@ -144,6 +147,7 @@ const NAV_GROUPS = [
   { h: "Manager",  items: ["managerboard"] },
   { h: "Work",     items: ["board", "tasks", "blockers", "projects"] },
   { h: "Reporting",items: ["daily", "dayboard", "update", "analytics"] },
+  { h: "Culture",  items: ["goodvibes"] },
   { h: "Admin",    items: ["team", "settings"] }
 ];
 /** Manager-only nav items a manager may hide for everyone from Settings
@@ -236,7 +240,8 @@ function paint() {
     cc: viewControlCenter, myday: viewMyDay, working: viewWorking, attention: viewAttention,
     board: viewBoard, managerboard: () => viewTaskBoard("Managers Board"),
     tasks: viewTasks, team: viewTeam, blockers: viewBlockers,
-    projects: viewProjects, daily: viewDaily, dayboard: viewDayBoard, update: viewUpdate, analytics: viewAnalytics, settings: viewSettings
+    projects: viewProjects, daily: viewDaily, dayboard: viewDayBoard, update: viewUpdate, analytics: viewAnalytics,
+    goodvibes: viewGoodVibes, settings: viewSettings
   }[S.view] || viewControlCenter))();
   v.innerHTML = banner + body;
 }

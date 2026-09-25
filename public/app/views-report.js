@@ -251,6 +251,17 @@ function viewSettings() {
               <input type="checkbox" data-navhide="${k}" ${(c.hiddenNav || []).includes(k) ? "" : "checked"}>${esc(VIEWS[k].label)}</label>`).join("")}
           <div class="hlp">Unchecking an item hides it from every manager's sidebar. Re-check it here to bring it back.</div>
         </div></section>
+
+      <section class="panel"><div class="panel-h"><h2>All tasks — optional columns</h2></div>
+        <div class="panel-b" style="display:grid;gap:5px">
+          ${normalizedTaskColOrder(c.taskColOrder).map(k => {
+            const label = (HIDEABLE_TASK_COLS.find(([id]) => id === k) || [])[1] || k;
+            return `<label draggable="true" data-colitem="${esc(k)}" class="colitem">
+                <span class="colitem-grip" aria-hidden="true">⠿⠿</span>
+                <input type="checkbox" data-taskcolhide="${esc(k)}" ${(c.hiddenTaskCols || []).includes(k) ? "" : "checked"}>${esc(label)}</label>`;
+          }).join("")}
+          <div class="hlp">Drag to reorder, uncheck to hide — both apply to the "All tasks" table for everyone immediately. The data isn't deleted, just decluttered/reordered.</div>
+        </div></section>
     </div>
 
     <div class="stack">

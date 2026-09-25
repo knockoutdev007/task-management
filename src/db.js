@@ -12,6 +12,7 @@ import mysql from "mysql2/promise";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,6 +61,7 @@ async function applySchema() {
   try {
     await conn.query(sql);
     await migrateTaskBoardColumns(conn);
+    await migrateEmployeeRoleCheck(conn);
   } finally { await conn.end(); }
 }
 
@@ -81,6 +83,35 @@ async function migrateTaskBoardColumns(conn) {
   await conn.query("UPDATE tasks SET assigned_date = SUBSTRING(created_at, 1, 10) WHERE assigned_date IS NULL");
 }
 
+/** Older databases have `employees.role CHECK (role IN ('manager','employee'))`
+ *  from before the Team Lead role — CREATE TABLE IF NOT EXISTS is a no-op
+ *  against an existing table, so widen the constraint here if it's still the
+ *  old two-value one. Looked up by clause text, not a fixed constraint name,
+ *  since MySQL and MariaDB (this app runs on both) auto-name an unnamed
+ *  single-column CHECK differently. A server old enough to not enforce CHECK
+ *  at all (see schema.sql's own note) has nothing here to widen — harmless.
+ *
+ *  `ALTER TABLE ... DROP CONSTRAINT <name>` on the auto-named inline CHECK
+ *  fails on MariaDB (ER_CANT_DROP_FIELD_OR_KEY — it looks for an index/key
+ *  of that name first, not a CHECK) even though the constraint is real and
+ *  enforced; `MODIFY COLUMN` without a CHECK clause silently drops the old
+ *  inline one instead, then a fresh named CHECK is added — this works on
+ *  both MySQL 8+ and MariaDB 10.2.1+. */
+async function migrateEmployeeRoleCheck(conn) {
+  const [rows] = await conn.query(`
+    SELECT tc.CONSTRAINT_NAME, cc.CHECK_CLAUSE
+    FROM information_schema.TABLE_CONSTRAINTS tc
+    JOIN information_schema.CHECK_CONSTRAINTS cc
+      ON tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME AND tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
+    WHERE tc.TABLE_NAME = 'employees' AND tc.CONSTRAINT_SCHEMA = DATABASE() AND tc.CONSTRAINT_TYPE = 'CHECK'
+  `);
+  const roleConstraint = rows.find(r => /\brole\b/i.test(r.CHECK_CLAUSE) && /manager/i.test(r.CHECK_CLAUSE));
+  if (roleConstraint && !/teamlead/i.test(roleConstraint.CHECK_CLAUSE)) {
+    await conn.query("ALTER TABLE employees MODIFY COLUMN role VARCHAR(16) NOT NULL DEFAULT 'employee'");
+    await conn.query("ALTER TABLE employees ADD CONSTRAINT `role` CHECK (role IN ('manager','employee','teamlead'))");
+  }
+}
+
 /** Every exported function funnels through this — ensures the pool exists and
  *  schema.sql has run before the first real query, memoized so concurrent
  *  callers (e.g. a Promise.all of several queries) only trigger it once. */
@@ -96,7 +127,10 @@ const J = (v, fallback) => { try { return v == null ? fallback : JSON.parse(v); 
 
 /** Used only by seed scripts to reset to an empty database. Order matters: children before parents. */
 export async function wipeAllTables() {
-  for (const table of ["task_activity", "task_comments", "tasks", "daily_updates", "projects", "sessions", "employees", "config"]) {
+  for (const table of [
+    "good_vibes_likes", "good_vibes_comments", "good_vibes_posts", "good_vibes_assignments", "good_vibes_rotation_order",
+    "task_activity", "task_comments", "tasks", "daily_updates", "projects", "sessions", "employees", "config"
+  ]) {
     await exec(`DELETE FROM ${table}`);
   }
 }
@@ -130,7 +164,15 @@ export const DEFAULT_CONFIG = {
   progressSteps: [0, 10, 25, 50, 75, 90, 100],
   notify: { assigned: true, priority: true, dueSoon: true, overdue: true, blocked: true, comment: true, completed: false, reassigned: true, dependency: true, attachment: true },
   boards: [],       // manager-created extra Task-Board-style nav entries: [{ id, name }]
-  hiddenNav: []     // manager-only nav view keys a manager has hidden from everyone's sidebar
+  hiddenNav: [],    // manager-only nav view keys a manager has hidden from everyone's sidebar
+  // All Tasks table column ids a manager has hidden from everyone's table — hidden by
+  // default (the table is dense with all 15 columns shown); re-enable any of these
+  // from Settings > "All tasks — optional columns".
+  hiddenTaskCols: ["progress", "created", "due", "expected", "updated", "est", "act", "blocker", "attention"],
+  // Manager-chosen display order for that same set of optional columns, draggable
+  // from the same Settings panel. Core columns (id/title/assignee/project/priority/
+  // status) always stay first and are never reordered.
+  taskColOrder: ["progress", "created", "due", "expected", "updated", "est", "act", "blocker", "attention"]
 };
 
 export async function getConfig() {
@@ -218,7 +260,7 @@ export async function upsertEmployee(e) {
       active = VALUES(active), updated_at = VALUES(updated_at)
   `, [
     e.id, e.name, e.initials || "", e.username,
-    e.role === "manager" ? "manager" : "employee", e.title || "",
+    ["manager", "teamlead"].includes(e.role) ? e.role : "employee", e.title || "",
     e.departmentId || "", e.teamId || "",
     e.managerId || null, e.capacityHours || 40,
     e.color || "#0E7C86", e.active === false ? 0 : 1,
@@ -546,3 +588,256 @@ export async function readSession(id) {
 export const dropSession = async id => exec("DELETE FROM sessions WHERE id = ?", [id]);
 export const dropSessionsFor = async employeeId => exec("DELETE FROM sessions WHERE employee_id = ?", [employeeId]);
 export const purgeSessions = async () => exec("DELETE FROM sessions WHERE expires_at <= ?", [now()]);
+
+/* ------------------------------------------------------------ good vibes wall */
+// Storage only — the business rules (isWorkingDay/nextInRotation/projectUpcoming
+// in src/domain.js) are duplicated as tiny private helpers below rather than
+// imported, to avoid a circular import (domain.js already imports getConfig
+// from this file); same "duplicate, don't couple" convention this codebase
+// already uses for BREAK_TYPES/BOARD_CATEGORIES between client and server.
+const _isWorkingDay = (dateISO, workingDays) => (workingDays || []).includes(new Date(dateISO + "T00:00:00Z").getUTCDay());
+const _nextInRotation = (order, currentId) => {
+  if (!order.length) return null;
+  const idx = order.indexOf(currentId);
+  return order[(idx === -1 ? 0 : idx + 1) % order.length];
+};
+const _addDaysISO = (dateISO, n) => {
+  const d = new Date(dateISO + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+const gvRotationRowOut = r => ({ employeeId: r.employee_id, name: r.name, active: !!r.active, sortOrder: r.sort_order });
+
+/** Appends any employee missing from the rotation order table, alphabetically
+ *  (matching listEmployees()'s own ORDER BY name), after whatever's already there. */
+export async function ensureRotationSeeded() {
+  const [existing] = await exec("SELECT employee_id FROM good_vibes_rotation_order");
+  const known = new Set(existing.map(r => r.employee_id));
+  const [empRows] = await exec("SELECT id FROM employees ORDER BY name");
+  const missing = empRows.filter(r => !known.has(r.id));
+  if (!missing.length) return;
+  const [maxRows] = await exec("SELECT COALESCE(MAX(sort_order), 0) AS maxOrder FROM good_vibes_rotation_order");
+  let next = maxRows[0].maxOrder + 1;
+  const t = now();
+  for (const r of missing) {
+    await exec("INSERT INTO good_vibes_rotation_order (employee_id, sort_order, updated_at) VALUES (?, ?, ?)", [r.id, next++, t]);
+  }
+}
+
+/** Active employees only, in rotation order — this *is* the "skip inactive
+ *  employees" rule: they're simply excluded from the working sequence. */
+export async function getActiveRotationOrder() {
+  await ensureRotationSeeded();
+  const [rows] = await exec(`
+    SELECT r.employee_id FROM good_vibes_rotation_order r
+    JOIN employees e ON e.id = r.employee_id
+    WHERE e.active = 1
+    ORDER BY r.sort_order
+  `);
+  return rows.map(r => r.employee_id);
+}
+
+/** Every employee (active + inactive) in rotation order, for the admin screen. */
+export async function listRotationAdmin() {
+  await ensureRotationSeeded();
+  const [rows] = await exec(`
+    SELECT r.employee_id, r.sort_order, e.name, e.active
+    FROM good_vibes_rotation_order r
+    JOIN employees e ON e.id = r.employee_id
+    ORDER BY r.sort_order
+  `);
+  return rows.map(gvRotationRowOut);
+}
+
+/** Rewrites sort_order 1..N for a full permutation of the known set. */
+export async function setRotationOrder(employeeIds) {
+  const t = now();
+  for (let i = 0; i < employeeIds.length; i++) {
+    await exec("UPDATE good_vibes_rotation_order SET sort_order = ?, updated_at = ? WHERE employee_id = ?", [i + 1, t, employeeIds[i]]);
+  }
+  return listRotationAdmin();
+}
+
+const gvAssignmentOut = r => r && ({
+  id: r.id, date: r.date, employeeId: r.employee_id, status: r.status,
+  skippedEmployeeId: r.skipped_employee_id, reassignedById: r.reassigned_by_id,
+  createdAt: r.created_at, updatedAt: r.updated_at
+});
+export async function getLatestAssignment() {
+  const [rows] = await exec("SELECT * FROM good_vibes_assignments ORDER BY date DESC LIMIT 1");
+  return gvAssignmentOut(rows[0]);
+}
+export async function getAssignmentByDate(date) {
+  const [rows] = await exec("SELECT * FROM good_vibes_assignments WHERE date = ?", [date]);
+  return gvAssignmentOut(rows[0]);
+}
+export async function insertAssignment(row) {
+  const t = now();
+  await exec(
+    `INSERT INTO good_vibes_assignments (id, date, employee_id, status, skipped_employee_id, reassigned_by_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [row.id, row.date, row.employeeId, row.status || "scheduled", row.skippedEmployeeId || null, row.reassignedById || null, t, t]
+  );
+  return getAssignmentByDate(row.date);
+}
+/** Used by admin skip/reassign — overwrites who holds a day's slot. */
+export async function updateAssignment(id, patch) {
+  const t = now();
+  await exec(
+    `UPDATE good_vibes_assignments SET employee_id = ?, status = ?, skipped_employee_id = ?, reassigned_by_id = ?, updated_at = ? WHERE id = ?`,
+    [patch.employeeId, patch.status, patch.skippedEmployeeId || null, patch.reassignedById || null, t, id]
+  );
+  const [rows] = await exec("SELECT * FROM good_vibes_assignments WHERE id = ?", [id]);
+  return gvAssignmentOut(rows[0]);
+}
+
+/** Walks the rotation forward one working day at a time from the last known
+ *  assignment through targetDateISO (inclusive), creating a real row (and a
+ *  "your turn" notification) for every intervening working day — not just
+ *  jumping to today — so a gap (a weekend, the app going untouched a few
+ *  days) never silently drops a turn. Runs at request time; there's no
+ *  cron/scheduler in this app. Idempotent: a concurrent duplicate insert on
+ *  the same date (UNIQUE(date)) is treated as a no-op, not an error. */
+export async function ensureAssignmentsThrough(targetDateISO) {
+  const config = await getConfig();
+  const workingDays = (config.workingDays && config.workingDays.length) ? config.workingDays : [1, 2, 3, 4, 5];
+  const order = await getActiveRotationOrder();
+  if (!order.length) return [];
+
+  const created = [];
+  const insertOnce = async row => {
+    try {
+      const saved = await insertAssignment(row);
+      created.push(saved);
+      await addNotification({
+        id: randomUUID(), employeeId: saved.employeeId, taskId: null, activityId: null,
+        kind: "goodvibes_turn", text: "It's your turn on the Good Vibes Wall!", createdAt: saved.createdAt, readAt: null
+      });
+      return saved;
+    } catch (e) {
+      if (e && e.code === "ER_DUP_ENTRY") return getAssignmentByDate(row.date);
+      throw e;
+    }
+  };
+
+  let last = await getLatestAssignment();
+  if (!last) {
+    if (_isWorkingDay(targetDateISO, workingDays)) await insertOnce({ id: randomUUID(), date: targetDateISO, employeeId: order[0] });
+    return created;
+  }
+
+  let cursorDate = _addDaysISO(last.date, 1);
+  let cursorEmployeeId = last.employeeId;
+  let guard = 0;
+  while (cursorDate <= targetDateISO && guard++ < 3650) {
+    if (_isWorkingDay(cursorDate, workingDays)) {
+      cursorEmployeeId = _nextInRotation(order, cursorEmployeeId);
+      const saved = await insertOnce({ id: randomUUID(), date: cursorDate, employeeId: cursorEmployeeId });
+      cursorEmployeeId = saved.employeeId;   // in case a concurrent request already claimed this date
+    }
+    cursorDate = _addDaysISO(cursorDate, 1);
+  }
+  return created;
+}
+
+const gvPostOut = r => r && ({
+  id: r.id, assignmentId: r.assignment_id, employeeId: r.employee_id,
+  category: r.category, body: r.body,
+  hiddenAt: r.hidden_at, hiddenById: r.hidden_by_id,
+  createdAt: r.created_at, updatedAt: r.updated_at
+});
+const gvCommentOut = r => ({
+  id: r.id, postId: r.post_id, authorId: r.author_id, at: r.at, body: r.body,
+  hiddenAt: r.hidden_at, hiddenById: r.hidden_by_id
+});
+
+/** Every post (comments and like count nested), newest first, assembled in
+ *  three parallel queries — same "N queries, not N×M" shape as listTasks(). */
+export async function listGvPosts({ includeHidden = false, viewerEmployeeId = null } = {}) {
+  const postWhere = includeHidden ? "" : "WHERE hidden_at IS NULL";
+  const commentWhere = includeHidden ? "" : "WHERE hidden_at IS NULL";
+  const [[posts], [likes], [comments]] = await Promise.all([
+    exec(`SELECT * FROM good_vibes_posts ${postWhere} ORDER BY created_at DESC`),
+    exec("SELECT * FROM good_vibes_likes"),
+    exec(`SELECT * FROM good_vibes_comments ${commentWhere} ORDER BY at`)
+  ]);
+  const likesByPost = {}, commentsByPost = {};
+  for (const l of likes) (likesByPost[l.post_id] ||= []).push(l);
+  for (const c of comments) (commentsByPost[c.post_id] ||= []).push(gvCommentOut(c));
+  return posts.map(p => {
+    const postLikes = likesByPost[p.id] || [];
+    return {
+      ...gvPostOut(p),
+      likeCount: postLikes.length,
+      likedByMe: viewerEmployeeId ? postLikes.some(l => l.employee_id === viewerEmployeeId) : false,
+      comments: commentsByPost[p.id] || []
+    };
+  });
+}
+export async function getGvPost(id) {
+  const [rows] = await exec("SELECT * FROM good_vibes_posts WHERE id = ?", [id]);
+  return gvPostOut(rows[0]);
+}
+export async function getGvPostByAssignment(assignmentId) {
+  const [rows] = await exec("SELECT * FROM good_vibes_posts WHERE assignment_id = ?", [assignmentId]);
+  return gvPostOut(rows[0]);
+}
+export async function insertGvPost(row) {
+  const t = now();
+  await exec(
+    `INSERT INTO good_vibes_posts (id, assignment_id, employee_id, category, body, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [row.id, row.assignmentId, row.employeeId, row.category, row.body, t, t]
+  );
+  return getGvPost(row.id);
+}
+export const hideGvPost = async (id, byId) =>
+  exec("UPDATE good_vibes_posts SET hidden_at = ?, hidden_by_id = ? WHERE id = ?", [now(), byId, id]);
+
+/** Toggle: delete-if-exists else insert. Returns the resulting state. */
+export async function toggleGvLike(postId, employeeId) {
+  const [existing] = await exec("SELECT id FROM good_vibes_likes WHERE post_id = ? AND employee_id = ?", [postId, employeeId]);
+  if (existing[0]) await exec("DELETE FROM good_vibes_likes WHERE id = ?", [existing[0].id]);
+  else await exec("INSERT INTO good_vibes_likes (id, post_id, employee_id, created_at) VALUES (?, ?, ?, ?)", [randomUUID(), postId, employeeId, now()]);
+  const [countRows] = await exec("SELECT COUNT(*) AS n FROM good_vibes_likes WHERE post_id = ?", [postId]);
+  return { liked: !existing[0], likeCount: countRows[0].n };
+}
+
+export async function addGvComment(postId, row) {
+  await exec(
+    "INSERT INTO good_vibes_comments (id, post_id, author_id, at, body) VALUES (?, ?, ?, ?, ?)",
+    [row.id, postId, row.authorId || null, row.at, row.body]
+  );
+  return gvCommentOut({ id: row.id, post_id: postId, author_id: row.authorId || null, at: row.at, body: row.body, hidden_at: null, hidden_by_id: null });
+}
+export const hideGvComment = async (id, byId) =>
+  exec("UPDATE good_vibes_comments SET hidden_at = ?, hidden_by_id = ? WHERE id = ?", [now(), byId, id]);
+
+/** One round trip for the Good Vibes Wall page: today's assignment (with its
+ *  post, if any), the visible posts feed, and a read-only preview of who's
+ *  next. Also the piece shared field-for-field with /api/bootstrap. */
+export async function getGoodVibesBootstrap({ viewerEmployeeId = null, includeHidden = false, upcomingCount = 5 } = {}) {
+  const todayDate = now().slice(0, 10);
+  await ensureAssignmentsThrough(todayDate);
+  const [todayAssignment, posts, order] = await Promise.all([
+    getAssignmentByDate(todayDate),
+    listGvPosts({ includeHidden, viewerEmployeeId }),
+    getActiveRotationOrder()
+  ]);
+  const todayPost = todayAssignment ? (posts.find(p => p.assignmentId === todayAssignment.id) || null) : null;
+  const upcoming = [];
+  if (order.length) {
+    let cursor = todayAssignment ? todayAssignment.employeeId : null;
+    for (let i = 0; i < upcomingCount; i++) {
+      cursor = _nextInRotation(order, cursor);
+      if (cursor == null) break;
+      upcoming.push(cursor);
+    }
+  }
+  return {
+    today: todayAssignment ? { ...todayAssignment, post: todayPost } : null,
+    posts,
+    upcoming
+  };
+}
