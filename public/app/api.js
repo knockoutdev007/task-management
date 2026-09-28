@@ -64,6 +64,7 @@ function absorb(d) {
   if (d.notifications) S.notifications = d.notifications;
   if (d.myNotifyPrefs) S.myNotifyPrefs = d.myNotifyPrefs;
   if (d.goodVibes) S.goodVibes = Object.assign(S.goodVibes, d.goodVibes);
+  if (d.complaints) S.complaints = d.complaints;
 }
 
 async function initData() {
@@ -107,7 +108,7 @@ function openStream() {
     // missed (src/events.js keeps no per-client backlog) - resync everything
     // rather than leave stale state until unrelated activity happens to
     // trigger the next broadcast.
-    await refresh(["tasks", "employees", "projects", "updates", "breaks", "config", "notifications", "goodvibes"]);
+    await refresh(["tasks", "employees", "projects", "updates", "breaks", "config", "notifications", "goodvibes", "complaints"]);
   };
   stream.onerror = () => {
     stream.close(); stream = null;
@@ -125,6 +126,7 @@ async function refresh(collections) {
   if (collections.includes("config"))    jobs.push(GET("/api/config").then(r => r.ok && (S.config = Object.assign(clone(DEFAULT_CONFIG), r.data.config))));
   if (collections.includes("notifications")) jobs.push(GET("/api/notifications").then(r => r.ok && (S.notifications = r.data.notifications)));
   if (collections.includes("goodvibes")) jobs.push(GET("/api/goodvibes/bootstrap").then(r => r.ok && absorb({ goodVibes: r.data.goodVibes })));
+  if (collections.includes("complaints")) jobs.push(GET("/api/complaints/bootstrap").then(r => r.ok && absorb({ complaints: r.data.complaints })));
   await Promise.all(jobs);
   render();
 }
@@ -277,6 +279,15 @@ async function deleteProjectRemote(id) {
   S.tasks.forEach(t => { if (t.projectId === id) t.projectId = null; });
   render();
   return true;
+}
+/** Settings "Data and access" — one-click wipe of every task and project. */
+async function deleteAllTaskData() {
+  const r = await DEL("/api/admin/task-data");
+  if (!r.ok) { toast(explain(r), true); return null; }
+  S.tasks = [];
+  S.projects = [];
+  render();
+  return r.data;
 }
 /** Settings changes go straight through; the server refuses anything unsafe. */
 async function saveConfig() {
@@ -443,6 +454,46 @@ async function hideGoodVibesComment(postId, commentId) {
   if (!r.ok) { toast(explain(r), true); return false; }
   const p = S.goodVibes.posts.find(x => x.id === postId);
   if (p) p.comments = (p.comments || []).filter(c => c.id !== commentId);
+  render();
+  return true;
+}
+
+/* ------------------------------------------------------------ complaint wall */
+async function loadComplaints() {
+  const r = await GET("/api/complaints/bootstrap");
+  if (!r.ok) { toast(explain(r), true); return false; }
+  S.complaints = r.data.complaints;
+  render();
+  return true;
+}
+async function submitComplaint(body) {
+  const r = await POST("/api/complaints", { body });
+  if (!r.ok) { toast(explain(r), true); return false; }
+  await loadComplaints();
+  return true;
+}
+async function castComplaintVote(id, believe) {
+  const c = S.complaints.find(x => x.id === id); if (!c) return;
+  const before = { yesVotes: c.yesVotes, noVotes: c.noVotes, totalVotes: c.totalVotes, myVote: c.myVote };
+  if (c.myVote !== null) { if (c.myVote) c.yesVotes--; else c.noVotes--; c.totalVotes--; }
+  c.myVote = believe; if (believe) c.yesVotes++; else c.noVotes++; c.totalVotes++;
+  render();
+  const r = await POST(`/api/complaints/${id}/vote`, { believe });
+  if (!r.ok) { Object.assign(c, before); render(); toast(explain(r), true); return; }
+  Object.assign(c, r.data);
+  render();
+}
+async function setComplaintStatus(id, status) {
+  const r = await PUT("/api/admin/complaints/" + id, { status });
+  if (!r.ok) { toast(explain(r), true); return false; }
+  S.complaints = S.complaints.map(c => c.id === id ? r.data.complaint : c);
+  render();
+  return true;
+}
+async function setComplaintPoll(id, pollEnabled) {
+  const r = await PUT("/api/admin/complaints/" + id, { pollEnabled });
+  if (!r.ok) { toast(explain(r), true); return false; }
+  S.complaints = S.complaints.map(c => c.id === id ? r.data.complaint : c);
   render();
   return true;
 }

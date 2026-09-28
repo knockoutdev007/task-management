@@ -141,6 +141,7 @@ const J = (v, fallback) => { try { return v == null ? fallback : JSON.parse(v); 
 /** Used only by seed scripts to reset to an empty database. Order matters: children before parents. */
 export async function wipeAllTables() {
   for (const table of [
+    "complaint_votes", "complaints",
     "good_vibes_likes", "good_vibes_comments", "good_vibes_posts", "good_vibes_assignments", "good_vibes_rotation_order",
     "task_activity", "task_comments", "tasks", "daily_updates", "projects", "sessions", "employees", "config"
   ]) {
@@ -178,6 +179,12 @@ export const DEFAULT_CONFIG = {
   notify: { assigned: true, priority: true, dueSoon: true, overdue: true, blocked: true, comment: true, completed: false, reassigned: true, dependency: true, attachment: true },
   boards: [],       // manager-created extra Task-Board-style nav entries: [{ id, name }]
   hiddenNav: [],    // manager-only nav view keys a manager has hidden from everyone's sidebar
+  // Whole-feature on/off switches a manager flips from Settings > "Features" — unlike
+  // hiddenNav (manager-only views, hidden from the manager's own sidebar), these gate
+  // views shared with employees/team leads, for every role, and are enforced here on
+  // the server too (see the feature-gate middleware in routes/goodvibes.js and
+  // routes/complaints.js), not just hidden client-side. Missing/undefined reads as on.
+  featureFlags: { goodVibes: true, complaints: true },
   // All Tasks table column ids a manager has hidden from everyone's table — hidden by
   // default (the table is dense with all 15 columns shown); re-enable any of these
   // from Settings > "All tasks — optional columns".
@@ -332,6 +339,11 @@ export async function upsertProject(p) {
   return getProject(p.id);
 }
 export const deleteProject = async id => exec("DELETE FROM projects WHERE id = ?", [id]);
+export async function countProjects() {
+  const [rows] = await exec("SELECT COUNT(*) AS c FROM projects");
+  return rows[0].c;
+}
+export const deleteAllProjects = async () => exec("DELETE FROM projects");
 
 /* ------------------------------------------------------------------- tasks */
 
@@ -428,6 +440,11 @@ export async function upsertTask(t) {
   return t.id;
 }
 export const deleteTask = async id => exec("DELETE FROM tasks WHERE id = ?", [id]);
+export async function countTasks() {
+  const [rows] = await exec("SELECT COUNT(*) AS c FROM tasks");
+  return rows[0].c;
+}
+export const deleteAllTasks = async () => exec("DELETE FROM tasks");
 
 export const addComment = async (taskId, c) =>
   exec("INSERT INTO task_comments (id, task_id, author_id, at, body, manager_note) VALUES (?, ?, ?, ?, ?, ?)",
@@ -455,6 +472,10 @@ export async function getAttachmentRow(id) {
   return rows[0];
 }
 export const deleteAttachmentRow = async id => exec("DELETE FROM task_attachments WHERE id = ?", [id]);
+export async function listAttachmentFilenames() {
+  const [rows] = await exec("SELECT filename FROM task_attachments");
+  return rows.map(r => r.filename);
+}
 
 /* ------------------------------------------------------------- notifications */
 
@@ -860,4 +881,116 @@ export async function getGoodVibesBootstrap({ viewerEmployeeId = null, includeHi
     posts,
     upcoming
   };
+}
+
+/* --------------------------------------------------------- complaint wall */
+
+/** yesVotes/noVotes/totalVotes are always included; employeeId, the
+ *  publish/archive actor ids, and the individual `votes` array are added
+ *  by the caller only for a manager viewer — the shape itself never
+ *  carries the submitter's identity by default. */
+const complaintOut = (r, votes) => {
+  const yesVotes = votes.filter(v => v.believe).length;
+  return {
+    id: r.id, body: r.body, status: r.status, pollEnabled: !!r.poll_enabled,
+    createdAt: r.created_at, updatedAt: r.updated_at,
+    publishedAt: r.published_at, archivedAt: r.archived_at,
+    yesVotes, noVotes: votes.length - yesVotes, totalVotes: votes.length
+  };
+};
+async function getComplaintRow(id) {
+  const [rows] = await exec("SELECT * FROM complaints WHERE id = ?", [id]);
+  return rows[0];
+}
+
+/** Full, manager-shaped view of one complaint (identity + individual
+ *  votes included) — used for the admin write routes and for checking a
+ *  complaint's state before accepting a vote. Never hand this object
+ *  straight back to a non-manager caller. */
+export async function getComplaint(id) {
+  const row = await getComplaintRow(id);
+  if (!row) return null;
+  const [votes] = await exec("SELECT * FROM complaint_votes WHERE complaint_id = ?", [id]);
+  const out = complaintOut(row, votes);
+  out.employeeId = row.employee_id;
+  out.publishedById = row.published_by_id;
+  out.archivedById = row.archived_by_id;
+  out.votes = votes.map(v => ({ employeeId: v.employee_id, believe: !!v.believe, at: v.created_at }));
+  return out;
+}
+
+/** Managers see every complaint in every status, with identity and
+ *  individual votes. Everyone else sees only published complaints,
+ *  anonymized, with just the vote totals plus their own vote (if any). */
+export async function listComplaints({ isManagerView = false, viewerId = null } = {}) {
+  const where = isManagerView ? "" : "WHERE status = 'published'";
+  const [[rows], [allVotes]] = await Promise.all([
+    exec(`SELECT * FROM complaints ${where} ORDER BY created_at DESC`),
+    exec("SELECT * FROM complaint_votes")
+  ]);
+  const votesByComplaint = {};
+  for (const v of allVotes) (votesByComplaint[v.complaint_id] ||= []).push(v);
+  return rows.map(r => {
+    const votes = votesByComplaint[r.id] || [];
+    const out = complaintOut(r, votes);
+    const mine = viewerId ? votes.find(v => v.employee_id === viewerId) : null;
+    out.myVote = mine ? !!mine.believe : null;
+    if (isManagerView) {
+      out.employeeId = r.employee_id;
+      out.publishedById = r.published_by_id;
+      out.archivedById = r.archived_by_id;
+      out.votes = votes.map(v => ({ employeeId: v.employee_id, believe: !!v.believe, at: v.created_at }));
+    }
+    return out;
+  });
+}
+
+export async function insertComplaint(row) {
+  const t = now();
+  await exec(
+    `INSERT INTO complaints (id, employee_id, body, status, poll_enabled, created_at, updated_at)
+     VALUES (?, ?, ?, 'pending', 0, ?, ?)`,
+    [row.id, row.employeeId, row.body, t, t]
+  );
+  return getComplaint(row.id);
+}
+
+/** Manager-only write: move a complaint between pending/published/archived
+ *  and/or toggle its poll. Publish/archive timestamps and actor ids are
+ *  only (re)stamped the moment status actually changes into that state. */
+export async function updateComplaint(id, { status, pollEnabled, byId } = {}) {
+  const existing = await getComplaintRow(id);
+  if (!existing) return null;
+  const t = now();
+  const nextStatus = status !== undefined ? status : existing.status;
+  const enteringPublished = status === "published" && existing.status !== "published";
+  const enteringArchived = status === "archived" && existing.status !== "archived";
+  await exec(
+    `UPDATE complaints SET status = ?, poll_enabled = ?, published_at = ?, published_by_id = ?,
+       archived_at = ?, archived_by_id = ?, updated_at = ? WHERE id = ?`,
+    [
+      nextStatus,
+      pollEnabled !== undefined ? (pollEnabled ? 1 : 0) : existing.poll_enabled,
+      enteringPublished ? t : existing.published_at,
+      enteringPublished ? byId : existing.published_by_id,
+      enteringArchived ? t : existing.archived_at,
+      enteringArchived ? byId : existing.archived_by_id,
+      t, id
+    ]
+  );
+  return getComplaint(id);
+}
+
+/** Upserts the voter's yes/no, then returns only the tally plus their own
+ *  vote — never other employees' identities or individual votes, even
+ *  though the caller may not be a manager. */
+export async function castComplaintVote(complaintId, employeeId, believe) {
+  await exec(
+    `INSERT INTO complaint_votes (id, complaint_id, employee_id, believe, created_at) VALUES (?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE believe = VALUES(believe), created_at = VALUES(created_at)`,
+    [randomUUID(), complaintId, employeeId, believe ? 1 : 0, now()]
+  );
+  const [votes] = await exec("SELECT believe FROM complaint_votes WHERE complaint_id = ?", [complaintId]);
+  const yesVotes = votes.filter(v => v.believe).length;
+  return { yesVotes, noVotes: votes.length - yesVotes, totalVotes: votes.length, myVote: believe };
 }

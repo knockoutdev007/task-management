@@ -19,6 +19,15 @@ import { wrap } from "../wrap.js";
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export function mountGoodVibes(app, requireUser, requireManager, requireManagerOrTeamLead) {
+  /** A manager can switch the whole feature off from Settings > "Features"
+   *  (cfg().featureFlags.goodVibes) — enforced here, not just hidden from
+   *  the nav, so a direct API call can't bypass it either. */
+  app.use("/api/goodvibes", wrap(async (req, res, next) => {
+    const cfg = await store.getConfig();
+    if ((cfg.featureFlags || {}).goodVibes === false) return res.status(404).json({ error: "Good Vibes Wall is turned off." });
+    next();
+  }));
+
   /* ---------------------------------------------------------------- reads */
   app.get("/api/goodvibes/bootstrap", requireUser, wrap(async (req, res) => {
     const goodVibes = await store.getGoodVibesBootstrap({ viewerEmployeeId: req.user.id, includeHidden: isManager(req.user) });

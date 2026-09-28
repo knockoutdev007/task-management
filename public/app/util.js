@@ -183,6 +183,7 @@ const DEFAULT_CONFIG = {
   notify: { assigned: true, priority: true, dueSoon: true, overdue: true, blocked: true, comment: true, completed: false, reassigned: true },
   boards: [],
   hiddenNav: [],
+  featureFlags: { goodVibes: true, complaints: true },
   hiddenTaskCols: ["progress", "created", "due", "expected", "updated", "est", "act", "blocker", "attention"],
   taskColOrder: ["progress", "created", "due", "expected", "updated", "est", "act", "blocker", "attention"]
 };
@@ -245,6 +246,8 @@ const S = {
   taskBoardFilter: store.get("taskBoardFilter", { category: "" }),
   goodVibes: { today: null, posts: [], upcoming: [], rotation: [] },
   goodVibesFilter: store.get("goodVibesFilter", { category: "" }),
+  complaints: [],
+  complaintFilter: store.get("complaintFilter", { status: "" }),
   teamFilters: store.get("teamFilters", { priority: "", status: "" }),
   teamSort: store.get("teamSort", { key: "name", dir: 1 }),
   ovFilters: store.get("ovFilters", { priority: "", status: "" }),

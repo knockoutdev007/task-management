@@ -144,16 +144,26 @@ const VIEWS = {
   update:    { label: "Daily update",   icon: "edit",     roles: ["manager", "employee", "teamlead"] },
   analytics: { label: "Analytics",      icon: "chart",    roles: ["manager"] },
   goodvibes: { label: "Good Vibes Wall", icon: "heart",   roles: ["manager", "employee", "teamlead"] },
+  complaints:{ label: "Complaint Wall",  icon: "flag",    roles: ["manager", "employee", "teamlead"] },
   settings:  { label: "Settings",       icon: "cog",      roles: ["manager"] }
 };
+/** View ids a manager can switch off entirely from Settings > "Features"
+ *  (cfg().featureFlags) — distinct from HIDEABLE_NAV/hiddenNav below, which
+ *  only ever covers manager-only views hidden from the manager's own
+ *  sidebar. These are shared with employees/team leads, so turning one off
+ *  blocks it for every role, everywhere, not just the nav button. */
+const VIEW_FEATURE = { goodvibes: "goodVibes", complaints: "complaints" };
+const featureEnabled = key => (cfg().featureFlags || {})[key] !== false;
 /** True if this view is open to the current role — role membership first,
- *  then (team leads only) the specific capability grant. */
+ *  then (team leads only) the specific capability grant, then whether its
+ *  feature switch (if it has one) is on. */
 const viewAllowed = v => {
   const def = VIEWS[v];
   if (!def) return false;
   const role = S.me ? S.me.role : "employee";
   if (!def.roles.includes(role)) return false;
-  if (def.cap && role === "teamlead") return hasCapability(def.cap);
+  if (def.cap && role === "teamlead" && !hasCapability(def.cap)) return false;
+  if (VIEW_FEATURE[v] && !featureEnabled(VIEW_FEATURE[v])) return false;
   return true;
 };
 const NAV_GROUPS = [
@@ -161,7 +171,7 @@ const NAV_GROUPS = [
   { h: "Manager",  items: ["managerboard"] },
   { h: "Work",     items: ["board", "tasks", "blockers", "projects"] },
   { h: "Reporting",items: ["daily", "dayboard", "update", "analytics"] },
-  { h: "Culture",  items: ["goodvibes"] },
+  { h: "Culture",  items: ["goodvibes", "complaints"] },
   { h: "Admin",    items: ["team", "settings"] }
 ];
 /** Manager-only nav items a manager may hide for everyone from Settings
@@ -255,7 +265,7 @@ function paint() {
     board: viewBoard, managerboard: () => viewTaskBoard("Managers Board"),
     tasks: viewTasks, team: viewTeam, blockers: viewBlockers,
     projects: viewProjects, daily: viewDaily, dayboard: viewDayBoard, update: viewUpdate, analytics: viewAnalytics,
-    goodvibes: viewGoodVibes, settings: viewSettings
+    goodvibes: viewGoodVibes, complaints: viewComplaints, settings: viewSettings
   }[S.view] || viewControlCenter))();
   v.innerHTML = banner + body;
 }

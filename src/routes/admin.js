@@ -1,10 +1,13 @@
 /** People, projects, configuration and daily updates. */
+import fs from "node:fs";
+import path from "node:path";
 import { randomUUID } from "node:crypto";
 import * as store from "../db.js";
 import { isManager, isTeamLead, inManagedScope, hasCapability, TEAM_LEAD_CAPABILITIES } from "../domain.js";
 import { hashPassword, randomPassword } from "../auth.js";
 import { broadcast } from "../events.js";
 import { wrap } from "../wrap.js";
+import { UPLOAD_DIR } from "./attachments.js";
 
 const initialsOf = n => String(n || "?").trim().split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase();
 const PALETTE = ["#0E7C86","#2A5FA0","#6E42A8","#A85708","#16794A","#B8342A","#55708F","#8A5A2B","#3E7C5A","#7A4470"];
@@ -116,6 +119,21 @@ export function mountAdmin(app, requireUser, requireManager, requireManagerOrTea
     res.json({ ok: true });
   }));
 
+  /* --------------------------------------------------------- data reset */
+  /** Settings' "Data and access" panel: a one-click wipe of every task and
+   *  project (comments/attachments/activity cascade away with their task).
+   *  People and config are untouched. */
+  app.delete("/api/admin/task-data", requireUser, requireManager, wrap(async (req, res) => {
+    const [tasksDeleted, projectsDeleted, filenames] = await Promise.all([
+      store.countTasks(), store.countProjects(), store.listAttachmentFilenames()
+    ]);
+    await store.deleteAllTasks();
+    await store.deleteAllProjects();
+    for (const filename of filenames) fs.unlink(path.join(UPLOAD_DIR, filename), () => {});
+    broadcast(["tasks", "projects", "notifications"], req.user.id);
+    res.json({ ok: true, tasksDeleted, projectsDeleted });
+  }));
+
   /* -------------------------------------------------------------- config */
   app.get("/api/config", requireUser, wrap(async (_req, res) => res.json({ config: await store.getConfig() })));
 
@@ -163,7 +181,7 @@ export function mountAdmin(app, requireUser, requireManager, requireManagerOrTea
   /* ----------------------------------------------------------- bootstrap */
   // One round trip for a cold load, instead of five.
   app.get("/api/bootstrap", requireUser, wrap(async (req, res) => {
-    const [employees, projects, tasks, updates, breaks, config, notifications, myNotifyPrefs, goodVibes] = await Promise.all([
+    const [employees, projects, tasks, updates, breaks, config, notifications, myNotifyPrefs, goodVibes, complaints] = await Promise.all([
       store.listEmployees(),
       store.listProjects(),
       store.listTasks(),
@@ -172,10 +190,11 @@ export function mountAdmin(app, requireUser, requireManager, requireManagerOrTea
       store.getConfig(),
       store.listNotifications(req.user.id),
       store.getEmployeeNotifyPrefs(req.user.id),
-      store.getGoodVibesBootstrap({ viewerEmployeeId: req.user.id, includeHidden: isManager(req.user) })
+      store.getGoodVibesBootstrap({ viewerEmployeeId: req.user.id, includeHidden: isManager(req.user) }),
+      store.listComplaints({ isManagerView: isManager(req.user), viewerId: req.user.id })
     ]);
     res.json({
-      me: req.user, employees, projects, tasks, updates, breaks, config, notifications, myNotifyPrefs, goodVibes,
+      me: req.user, employees, projects, tasks, updates, breaks, config, notifications, myNotifyPrefs, goodVibes, complaints,
       serverTime: new Date().toISOString()
     });
   }));
