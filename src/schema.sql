@@ -286,3 +286,42 @@ CREATE TABLE IF NOT EXISTS good_vibes_comments (
   FOREIGN KEY (author_id) REFERENCES employees(id) ON DELETE SET NULL,
   FOREIGN KEY (hidden_by_id) REFERENCES employees(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+-- Complaint Wall — sibling feature to the Good Vibes Wall. Anyone can submit
+-- a complaint; it sits in a manager-only inbox (status='pending') until a
+-- manager publishes it. Published complaints are always shown anonymously
+-- on the board, whether or not a poll is running — only a manager can see
+-- who filed it. A poll asks everyone "do you believe this happened as
+-- described"; the running total is public, individual votes are not.
+
+CREATE TABLE IF NOT EXISTS complaints (
+  id               VARCHAR(64) PRIMARY KEY,
+  employee_id      VARCHAR(64) NOT NULL,   -- submitter; never exposed to non-managers
+  body             TEXT NOT NULL,
+  status           VARCHAR(16) NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending','published','archived')),
+  poll_enabled     TINYINT(1) NOT NULL DEFAULT 0,
+  published_at     VARCHAR(32),
+  published_by_id  VARCHAR(64),
+  archived_at      VARCHAR(32),
+  archived_by_id   VARCHAR(64),
+  created_at       VARCHAR(32) NOT NULL,
+  updated_at       VARCHAR(32) NOT NULL,
+  INDEX idx_complaints_status (status, created_at),
+  INDEX idx_complaints_employee (employee_id, created_at),
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+  FOREIGN KEY (published_by_id) REFERENCES employees(id) ON DELETE SET NULL,
+  FOREIGN KEY (archived_by_id) REFERENCES employees(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS complaint_votes (
+  id            VARCHAR(64) PRIMARY KEY,
+  complaint_id  VARCHAR(64) NOT NULL,
+  employee_id   VARCHAR(64) NOT NULL,
+  believe       TINYINT(1) NOT NULL,   -- 1 = believes it happened as described, 0 = doesn't
+  created_at    VARCHAR(32) NOT NULL,
+  UNIQUE KEY uq_complaint_votes (complaint_id, employee_id),
+  INDEX idx_complaint_votes_complaint (complaint_id),
+  FOREIGN KEY (complaint_id) REFERENCES complaints(id) ON DELETE CASCADE,
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

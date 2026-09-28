@@ -252,6 +252,13 @@ function viewSettings() {
           <div class="hlp">Unchecking an item hides it from every manager's sidebar. Re-check it here to bring it back.</div>
         </div></section>
 
+      <section class="panel"><div class="panel-h"><h2>Features</h2></div>
+        <div class="panel-b" style="display:grid;gap:5px">
+          ${Object.entries(VIEW_FEATURE).map(([viewId, key]) => `<label style="display:flex;gap:8px;align-items:center;font-size:12.5px">
+              <input type="checkbox" data-feature="${esc(key)}" ${(c.featureFlags || {})[key] === false ? "" : "checked"}>${esc(VIEWS[viewId].label)}</label>`).join("")}
+          <div class="hlp">Turning one off removes it from everyone's sidebar and blocks its pages entirely — not just hidden from you, and not just for managers. Existing posts and votes aren't deleted, just inaccessible while off.</div>
+        </div></section>
+
       <section class="panel"><div class="panel-h"><h2>All tasks — optional columns</h2></div>
         <div class="panel-b" style="display:grid;gap:5px">
           ${normalizedTaskColOrder(c.taskColOrder).map(k => {
@@ -321,13 +328,18 @@ function viewSettings() {
           <div class="dl"><dt>Storage</dt><dd>${S.connected ? "Shared artifact database — live for everyone with the link" : "Preview only — not connected"}</dd>
             <dt>Tasks</dt><dd class="mono">${S.tasks.length}</dd><dt>People</dt><dd class="mono">${S.employees.length}</dd><dt>Projects</dt><dd class="mono">${S.projects.length}</dd></div>
           <div style="display:flex;gap:7px;flex-wrap:wrap">
-            <button class="btn" data-export="tasks">${icon("dl")}All tasks</button>
+            <button class="btn" data-export="alltasks">${icon("dl")}Export all tasks</button>
             <button class="btn" data-export="workload">${icon("dl")}Workload</button>
             <button class="btn" data-export="weekly">${icon("dl")}Weekly report</button>
             <button class="btn" data-export="overdue">${icon("dl")}Overdue</button>
             <button class="btn" data-export="completed">${icon("dl")}Completed</button>
           </div>
           <div class="hlp">Settings are writable only by people the artifact is shared with as editors; everyone else can read them.</div>
+          <div style="border:1px solid var(--crit-line);border-radius:var(--r-md);padding:9px 10px;display:grid;gap:7px">
+            <div style="font-weight:600;font-size:12.5px">Danger zone</div>
+            <button class="btn dgr" data-delalltasks>${icon("x")}Delete all tasks and projects</button>
+            <div class="hlp">Permanently deletes every task (with its comments, attachments, and activity history) and every project. People and settings are untouched. This cannot be undone.</div>
+          </div>
         </div></section>
     </div>
   </div>`;

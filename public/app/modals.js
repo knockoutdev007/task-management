@@ -85,6 +85,19 @@ function goodVibesPostModal() {
       <div class="sp"><button class="btn" data-close>Cancel</button><button class="btn pri" data-savegvpost>Post to the wall</button></div></div>
   </div>`;
 }
+function complaintModal() {
+  return `<div class="modal" role="dialog" aria-modal="true" aria-label="Submit a complaint">
+    <div class="dh"><h2>Submit a complaint</h2><div class="sp"><button class="iconbtn" data-close>${icon("x")}</button></div></div>
+    <div class="db">
+      <div class="hlp">Only managers can see who submits a complaint. If it's published to the Complaint Wall, it's shown anonymously — even to you.</div>
+      <div class="field"><label for="cb-body">What happened?</label>
+        <textarea class="inp" id="cb-body" rows="5" maxlength="4000" placeholder="Describe what happened…"></textarea></div>
+      <div id="cb-err"></div>
+    </div>
+    <div class="df"><span></span>
+      <div class="sp"><button class="btn" data-close>Cancel</button><button class="btn pri" data-savecomplaint>Submit</button></div></div>
+  </div>`;
+}
 /** Admin rotation management — reorder (move up/down, saves immediately,
  *  same "no separate save step" convention as Settings' data-wd), skip or
  *  reassign today. No drag-and-drop here on purpose — avoids a third global
@@ -381,7 +394,7 @@ function showTempPassword(person, password) {
    ========================================================================== */
 function doExport(kind) {
   const stamp = todayISO();
-  if (kind === "tasks" || kind === "overdue" || kind === "completed" || kind === "attention") {
+  if (kind === "tasks" || kind === "alltasks" || kind === "overdue" || kind === "completed" || kind === "attention") {
     let rows = visibleTasks();
     if (kind === "tasks") rows = applyFilters(rows);
     if (kind === "overdue") rows = rows.filter(t => isActive(t) && flags(t).overdue);

@@ -20,7 +20,7 @@ import { wrap } from "../wrap.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || path.join(HERE, "..", "..", "data");
-const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
+export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const MAX_SIZE = 25 * 1024 * 1024; // 25MB

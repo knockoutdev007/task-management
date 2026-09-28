@@ -2,7 +2,11 @@
 /* ==========================================================================
    EVENTS
    ========================================================================== */
-function go(view) { S.view = view; store.set("view", view); S.empDetail = null; S.projDetail = null; S.dayBoardTeam = ""; closeLayer(); render(); $("#view").focus(); }
+function go(view) {
+  S.view = view; store.set("view", view); S.empDetail = null; S.projDetail = null; S.dayBoardTeam = "";
+  if (view === "website") { loadWebsitePosts(); loadWebsiteGuides(); loadStagingPosts(); loadStagingGuides(); }
+  closeLayer(); render(); $("#view").focus();
+}
 function persistState(key) { store.set(key, S[key]); return render(); }
 function setFilterFromKpi(spec) {
   if (!spec) return;
@@ -18,7 +22,7 @@ function setFilterFromKpi(spec) {
 }
 
 document.addEventListener("click", async ev => {
-  const el = ev.target.closest("[data-newtask],[data-newtboard],[data-savetboard],[data-tbtoggle],[data-view],[data-go],[data-kpi],[data-open],[data-close],[data-tab],[data-account],[data-savepw],[data-logout],[data-copytemp],[data-resetpw],[data-emp],[data-proj],[data-projtasks],[data-newfor],[data-newemp],[data-editemp],[data-newproj],[data-delproj],[data-edittask],[data-savetask],[data-deltask],[data-complete],[data-reopen],[data-blockit],[data-saveblocker],[data-unblock],[data-quickprog],[data-saveprogress],[data-pg],[data-setprog],[data-addcmt],[data-addlink],[data-savelink],[data-dellink],[data-delatt],[data-adddep],[data-savedep],[data-toggledep],[data-deldep],[data-saveemp],[data-saveproj],[data-bulk],[data-savebulk],[data-quick],[data-pick],[data-startbreak],[data-export],[data-week],[data-clearfilters],[data-clearteamfilters],[data-clearovfilters],[data-blockfilter],[data-sort],[data-teamsort],[data-copysummary],[data-dayboard],[data-addplan],[data-toggleplan],[data-delplan],[data-prefillplan],[data-adddept],[data-deldept],[data-addteam],[data-delteam],[data-addstatus],[data-delstatus],[data-wd],[data-dayteam],[data-addboard],[data-delboard],[data-newgvpost],[data-savegvpost],[data-gvlike],[data-gvaddcmt],[data-gvfilter],[data-gvmanage],[data-gvmoveup],[data-gvmovedown],[data-gvskip],[data-gvsavereassign],[data-gvhidepost],[data-gvhidecmt]");
+  const el = ev.target.closest("[data-newtask],[data-newtboard],[data-savetboard],[data-tbtoggle],[data-view],[data-go],[data-kpi],[data-open],[data-close],[data-tab],[data-account],[data-savepw],[data-logout],[data-copytemp],[data-resetpw],[data-emp],[data-proj],[data-projtasks],[data-newfor],[data-newemp],[data-editemp],[data-newproj],[data-delproj],[data-delalltasks],[data-edittask],[data-savetask],[data-deltask],[data-complete],[data-reopen],[data-blockit],[data-saveblocker],[data-unblock],[data-quickprog],[data-saveprogress],[data-pg],[data-setprog],[data-addcmt],[data-addlink],[data-savelink],[data-dellink],[data-delatt],[data-adddep],[data-savedep],[data-toggledep],[data-deldep],[data-saveemp],[data-saveproj],[data-bulk],[data-savebulk],[data-quick],[data-pick],[data-startbreak],[data-export],[data-week],[data-clearfilters],[data-clearteamfilters],[data-clearovfilters],[data-blockfilter],[data-sort],[data-teamsort],[data-copysummary],[data-dayboard],[data-addplan],[data-toggleplan],[data-delplan],[data-prefillplan],[data-adddept],[data-deldept],[data-addteam],[data-delteam],[data-addstatus],[data-delstatus],[data-wd],[data-dayteam],[data-addboard],[data-delboard],[data-newgvpost],[data-savegvpost],[data-gvlike],[data-gvaddcmt],[data-gvfilter],[data-gvmanage],[data-gvmoveup],[data-gvmovedown],[data-gvskip],[data-gvsavereassign],[data-gvhidepost],[data-gvhidecmt],[data-newcomplaint],[data-savecomplaint],[data-cbfilter],[data-cbstatus],[data-cbpoll],[data-cbvote],[data-refreshwebsite]");
   if (!el) return;
   const d = el.dataset;
 
@@ -306,6 +310,38 @@ document.addEventListener("click", async ev => {
     return;
   }
 
+  /* ---- complaint wall ---- */
+  if ("newcomplaint" in d) return openLayer(complaintModal());
+  if ("savecomplaint" in d) {
+    const err = m => { $("#cb-err").innerHTML = `<div class="hlp err">${esc(m)}</div>`; };
+    const body = $("#cb-body").value.trim();
+    if (!body) return err("Write something first.");
+    const ok = await submitComplaint(body);
+    if (ok) { closeLayer(); toast("Complaint submitted — only managers can see it until published."); }
+    return;
+  }
+  if ("cbfilter" in d) { S.complaintFilter.status = d.cbfilter; return persistState("complaintFilter"); }
+  if (d.cbstatus) {
+    if (!isManager()) return toast("Managers only.", true);
+    if (await setComplaintStatus(d.cbstatus, d.status)) toast("Updated");
+    return;
+  }
+  if (d.cbpoll) {
+    if (!isManager()) return toast("Managers only.", true);
+    if (await setComplaintPoll(d.cbpoll, d.pollon === "1")) toast(d.pollon === "1" ? "Poll started" : "Poll stopped");
+    return;
+  }
+  if (d.cbvote) { await castComplaintVote(d.cbvote, d.believe === "1"); return; }
+
+  /* ---- website updates ---- */
+  if ("refreshwebsite" in d) {
+    S.websitePosts.status = "loading"; S.websiteGuides.status = "loading";
+    S.stagingPosts.status = "loading"; S.stagingGuides.status = "loading";
+    render();
+    loadWebsitePosts(); loadWebsiteGuides(); loadStagingPosts(); loadStagingGuides();
+    return;
+  }
+
   /* ---- people & projects ---- */
   if ("newemp" in d) { if (!canAdmin()) return toast("Managers only.", true); return openLayer(employeeModal(null)); }
   if (d.editemp) { if (!canEditPerson(emp(d.editemp))) return toast("You can only edit people on your own team.", true); return openLayer(employeeModal(emp(d.editemp))); }
@@ -342,6 +378,15 @@ document.addEventListener("click", async ev => {
     const p = proj(d.delproj); if (!p) return;
     if (!confirm(`Delete “${p.name}”? Its tasks keep their history but lose the project label.`)) return;
     if (await deleteProjectRemote(d.delproj)) toast("Project deleted");
+    return;
+  }
+  if ("delalltasks" in d) {
+    if (!canAdmin()) return toast("Managers only.", true);
+    const nt = S.tasks.length, np = S.projects.length;
+    if (!confirm(`Permanently delete all ${nt} task${nt === 1 ? "" : "s"} and all ${np} project${np === 1 ? "" : "s"}? ` +
+      `This also removes every comment, attachment, and activity history. This cannot be undone.`)) return;
+    const r = await deleteAllTaskData();
+    if (r) toast(`Deleted ${r.tasksDeleted} task${r.tasksDeleted === 1 ? "" : "s"} and ${r.projectsDeleted} project${r.projectsDeleted === 1 ? "" : "s"}`);
     return;
   }
 
@@ -512,6 +557,11 @@ document.addEventListener("change", ev => {
     const hidden = new Set(cfg().hiddenNav || []);
     t.checked ? hidden.delete(ds.navhide) : hidden.add(ds.navhide);
     cfg().hiddenNav = Array.from(hidden);
+    return saveConfig();
+  }
+  if (ds.feature) {
+    cfg().featureFlags = cfg().featureFlags || {};
+    cfg().featureFlags[ds.feature] = t.checked;
     return saveConfig();
   }
   if (ds.taskcolhide) {

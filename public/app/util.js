@@ -98,7 +98,8 @@ function icon(name, cls = "") {
     edit:'<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/>',
     flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1Z"/><path d="M4 22v-7"/>',
     inbox:'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1Z"/>',
-    heart:'<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78Z"/>'
+    heart:'<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78Z"/>',
+    globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a13.5 13.5 0 0 1 3.5 9A13.5 13.5 0 0 1 12 21a13.5 13.5 0 0 1-3.5-9A13.5 13.5 0 0 1 12 3Z"/>'
   };
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${P[name] || ""}</svg>`;
 }
@@ -183,6 +184,7 @@ const DEFAULT_CONFIG = {
   notify: { assigned: true, priority: true, dueSoon: true, overdue: true, blocked: true, comment: true, completed: false, reassigned: true },
   boards: [],
   hiddenNav: [],
+  featureFlags: { goodVibes: true, complaints: true, website: true },
   hiddenTaskCols: ["progress", "created", "due", "expected", "updated", "est", "act", "blocker", "attention"],
   taskColOrder: ["progress", "created", "due", "expected", "updated", "est", "act", "blocker", "attention"]
 };
@@ -245,6 +247,12 @@ const S = {
   taskBoardFilter: store.get("taskBoardFilter", { category: "" }),
   goodVibes: { today: null, posts: [], upcoming: [], rotation: [] },
   goodVibesFilter: store.get("goodVibesFilter", { category: "" }),
+  complaints: [],
+  complaintFilter: store.get("complaintFilter", { status: "" }),
+  websitePosts: { status: "idle", posts: [], error: null },
+  websiteGuides: { status: "idle", posts: [], error: null },
+  stagingPosts: { status: "idle", posts: [], error: null },
+  stagingGuides: { status: "idle", posts: [], error: null },
   teamFilters: store.get("teamFilters", { priority: "", status: "" }),
   teamSort: store.get("teamSort", { key: "name", dir: 1 }),
   ovFilters: store.get("ovFilters", { priority: "", status: "" }),
