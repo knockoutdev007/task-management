@@ -1,13 +1,15 @@
 /**
  * Security-focused checks against a running server: session/cookie hardening,
- * login throttling, cross-user authorization boundaries (IDOR), input
- * validation limits, and file upload handling.
+ * login throttling (brute force), SQL injection resistance, cross-user
+ * authorization boundaries (IDOR), input validation limits, and file upload
+ * handling.
  *
  * Complements scripts/smoke-test.js (business rules and day-to-day RBAC)
  * rather than duplicating it — that file already covers who may edit/reassign/
  * delete a task, so this one focuses on things an attacker would actually try:
  * forged cookies, guessed ids, oversized/mistyped uploads, brute-forced
- * logins, and stale sessions after a password change.
+ * logins, SQL injection payloads in auth and record fields, and stale
+ * sessions after a password change.
  *
  *   npm start              # in one terminal, against a scratch database
  *   npm run test:security  # in another
@@ -124,6 +126,67 @@ ok("security headers are present: X-Frame-Options: SAMEORIGIN", (r.headers.get("
   const otherResult = await otherAccount("POST", "/api/auth/login", { username: "sec.beta", password: "definitely-wrong" });
   ok("the throttle is keyed per-username, not per-IP — a different account from the same caller isn't blocked by sec.throttle's lockout",
      otherResult.status === 401, `got ${otherResult.status}`);
+}
+
+/* ------------------------------------------------------------- sql injection */
+/* Every query in src/db.js is parameterized (mysql2 `?` placeholders), so
+ * these payloads should never be interpreted as SQL — they should either be
+ * rejected the same way any other bad input is, or stored/returned as inert
+ * literal text. This section proves that behaviorally rather than just by
+ * reading the source: send classic injection strings through auth and
+ * through record lookups/writes, then check the server is still healthy and
+ * no row was added, dropped, or leaked. */
+{
+  const AUTH_BYPASS_PAYLOADS = [
+    "' OR '1'='1",
+    "' OR '1'='1' -- ",
+    "' OR 1=1#",
+    "admin'--",
+    "' UNION SELECT * FROM employees --",
+    "'; DROP TABLE employees; --"
+  ];
+  for (const payload of AUTH_BYPASS_PAYLOADS) {
+    const probe = client();
+    r = await probe("POST", "/api/auth/login", { username: payload, password: payload });
+    ok(`login with a SQLi payload as username (${JSON.stringify(payload)}) is rejected, not a 500 or auth bypass`,
+       r.status === 401, `got ${r.status} :: ${JSON.stringify(r.data)}`);
+  }
+
+  r = await mgr("GET", "/api/health");
+  ok("the server (and its database connection) is still healthy after the login-based SQLi probes", r.status === 200 && r.data.ok === true, JSON.stringify(r.data));
+
+  const beforeTasks = (await mgr("GET", "/api/tasks")).data.tasks;
+  const sqliTitle = "Robert'); DROP TABLE tasks; --";
+  r = await mgr("POST", "/api/tasks", { title: sqliTitle, assigneeId: "emp-sec-alpha", priority: "MEDIUM", status: "NOT_STARTED", progress: 0 });
+  ok("a task title containing a SQL injection payload is accepted and stored as inert literal text",
+     r.status === 201 && r.data.task.title === sqliTitle, JSON.stringify(r.data));
+  const sqliTaskId = r.data.task?.id;
+
+  const afterTasks = (await mgr("GET", "/api/tasks")).data.tasks;
+  ok("the tasks table survives the payload — exactly one row was added, nothing dropped or duplicated",
+     afterTasks.length === beforeTasks.length + 1, `before ${beforeTasks.length}, after ${afterTasks.length}`);
+  ok("the stored title round-trips byte-for-byte, proving it was carried as data, never executed as SQL",
+     (afterTasks.find(t => t.id === sqliTaskId) || {}).title === sqliTitle);
+
+  r = await mgr("GET", `/api/tasks/${encodeURIComponent("' OR '1'='1")}`);
+  ok("an id-shaped SQLi payload used as a task lookup returns a clean 404, not a 500 or an all-rows leak",
+     r.status === 404 && !Array.isArray(r.data?.task), `got ${r.status} :: ${JSON.stringify(r.data)}`);
+
+  r = await mgr("PUT", `/api/admin/complaints/${encodeURIComponent("1' OR '1'='1")}`, { status: "published" });
+  ok("an id-shaped SQLi payload against the complaints admin endpoint returns 404, not an error or a mass-update",
+     r.status === 404, `got ${r.status} :: ${JSON.stringify(r.data)}`);
+
+  const sqliComplaintBody = "x'; UPDATE employees SET role='manager' WHERE username='sec.alpha'; --";
+  r = await alpha("POST", "/api/complaints", { body: sqliComplaintBody });
+  ok("a complaint body containing a SQL injection payload is accepted (queued for manager review)", r.status === 201, JSON.stringify(r.data));
+
+  r = await mgr("GET", "/api/complaints/bootstrap");
+  const storedComplaint = (r.data.complaints || []).find(c => c.body === sqliComplaintBody);
+  ok("the complaint's body round-trips exactly as submitted — the payload was stored as text, not executed",
+     !!storedComplaint, JSON.stringify((r.data.complaints || []).map(c => c.body)));
+
+  r = await alpha("GET", "/api/auth/me");
+  ok("the targeted account's role is untouched — the UPDATE embedded in the complaint body never ran", r.data.me?.role === "employee", JSON.stringify(r.data));
 }
 
 /* ------------------------------------------------------- session fixation */
