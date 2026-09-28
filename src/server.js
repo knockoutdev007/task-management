@@ -16,6 +16,7 @@ import { mountBreaks } from "./routes/breaks.js";
 import { mountNotifications } from "./routes/notifications.js";
 import { mountGoodVibes } from "./routes/goodvibes.js";
 import { mountComplaints } from "./routes/complaints.js";
+import { mountWebsite } from "./routes/website.js";
 import { listEmployees } from "./db.js";
 import { wrap } from "./wrap.js";
 
@@ -45,6 +46,7 @@ mountBreaks(app, requireUser);
 mountNotifications(app, requireUser);
 mountGoodVibes(app, requireUser, requireManager, requireManagerOrTeamLead);
 mountComplaints(app, requireUser, requireManager);
+mountWebsite(app, requireUser, requireManager);
 
 app.get("/api/health", wrap(async (_req, res) => res.json({ ok: true, people: (await listEmployees()).length })));
 

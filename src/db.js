@@ -184,7 +184,7 @@ export const DEFAULT_CONFIG = {
   // views shared with employees/team leads, for every role, and are enforced here on
   // the server too (see the feature-gate middleware in routes/goodvibes.js and
   // routes/complaints.js), not just hidden client-side. Missing/undefined reads as on.
-  featureFlags: { goodVibes: true, complaints: true },
+  featureFlags: { goodVibes: true, complaints: true, website: true },
   // All Tasks table column ids a manager has hidden from everyone's table — hidden by
   // default (the table is dense with all 15 columns shown); re-enable any of these
   // from Settings > "All tasks — optional columns".

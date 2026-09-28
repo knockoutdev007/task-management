@@ -498,6 +498,21 @@ async function setComplaintPoll(id, pollEnabled) {
   return true;
 }
 
+/* ------------------------------------------------------------- website updates */
+/** Always fetches live, no client- or server-side cache — see go("website")
+ *  in events.js, which calls all four of these every time the page is
+ *  opened (and the Refresh button, which calls them again). */
+async function loadWpSection(stateKey, site, type) {
+  const r = await GET(`/api/website/${site}/${type}`);
+  if (!r.ok) { S[stateKey] = { status: "error", posts: [], error: explain(r) }; render(); return; }
+  S[stateKey] = { status: "ready", posts: r.data.items, error: null };
+  render();
+}
+const loadWebsitePosts = () => loadWpSection("websitePosts", "live", "posts");
+const loadWebsiteGuides = () => loadWpSection("websiteGuides", "live", "guides");
+const loadStagingPosts = () => loadWpSection("stagingPosts", "staging", "posts");
+const loadStagingGuides = () => loadWpSection("stagingGuides", "staging", "guides");
+
 const myUpdates = id => (S.updates.find(u => u.id === id || u.employeeId === id) || {}).entries || [];
 const latestUpdate = id => { const e = myUpdates(id); return e.length ? e[e.length - 1] : null; };
 

@@ -143,6 +143,7 @@ const VIEWS = {
   dayboard:  { label: "Day plan board", icon: "board",    roles: ["manager", "teamlead"], cap: "dayboard" },
   update:    { label: "Daily update",   icon: "edit",     roles: ["manager", "employee", "teamlead"] },
   analytics: { label: "Analytics",      icon: "chart",    roles: ["manager"] },
+  website:   { label: "Website Updates", icon: "globe",   roles: ["manager"] },
   goodvibes: { label: "Good Vibes Wall", icon: "heart",   roles: ["manager", "employee", "teamlead"] },
   complaints:{ label: "Complaint Wall",  icon: "flag",    roles: ["manager", "employee", "teamlead"] },
   settings:  { label: "Settings",       icon: "cog",      roles: ["manager"] }
@@ -152,7 +153,7 @@ const VIEWS = {
  *  only ever covers manager-only views hidden from the manager's own
  *  sidebar. These are shared with employees/team leads, so turning one off
  *  blocks it for every role, everywhere, not just the nav button. */
-const VIEW_FEATURE = { goodvibes: "goodVibes", complaints: "complaints" };
+const VIEW_FEATURE = { goodvibes: "goodVibes", complaints: "complaints", website: "website" };
 const featureEnabled = key => (cfg().featureFlags || {})[key] !== false;
 /** True if this view is open to the current role — role membership first,
  *  then (team leads only) the specific capability grant, then whether its
@@ -170,14 +171,16 @@ const NAV_GROUPS = [
   { h: "Overview", items: ["cc", "myday", "working", "attention"] },
   { h: "Manager",  items: ["managerboard"] },
   { h: "Work",     items: ["board", "tasks", "blockers", "projects"] },
-  { h: "Reporting",items: ["daily", "dayboard", "update", "analytics"] },
+  { h: "Reporting",items: ["daily", "dayboard", "update", "analytics", "website"] },
   { h: "Culture",  items: ["goodvibes", "complaints"] },
   { h: "Admin",    items: ["team", "settings"] }
 ];
 /** Manager-only nav items a manager may hide for everyone from Settings
  *  (public/app/views-report.js "Manager nav visibility"). Anything shared
- *  with employees is never offered here. */
-const HIDEABLE_NAV = Object.keys(VIEWS).filter(k => VIEWS[k].roles.length === 1 && VIEWS[k].roles[0] === "manager");
+ *  with employees is never offered here, and anything with its own
+ *  Settings > "Features" switch (VIEW_FEATURE) is excluded too — one
+ *  on/off control per view, not two. */
+const HIDEABLE_NAV = Object.keys(VIEWS).filter(k => VIEWS[k].roles.length === 1 && VIEWS[k].roles[0] === "manager" && !VIEW_FEATURE[k]);
 /** Overview is the fallback landing page itself (hiding it must never create
  *  a bounce loop) and Settings must always stay reachable so a manager can
  *  undo a hide — for these two, the toggle only removes the sidebar button.
@@ -265,6 +268,7 @@ function paint() {
     board: viewBoard, managerboard: () => viewTaskBoard("Managers Board"),
     tasks: viewTasks, team: viewTeam, blockers: viewBlockers,
     projects: viewProjects, daily: viewDaily, dayboard: viewDayBoard, update: viewUpdate, analytics: viewAnalytics,
+    website: viewWebsiteUpdates,
     goodvibes: viewGoodVibes, complaints: viewComplaints, settings: viewSettings
   }[S.view] || viewControlCenter))();
   v.innerHTML = banner + body;
