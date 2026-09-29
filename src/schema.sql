@@ -32,11 +32,13 @@ CREATE TABLE IF NOT EXISTS employees (
   -- when role = 'teamlead'; a manager picks which of the team-lead powers this
   -- specific person actually has. Ignored for 'manager' (already has everything)
   -- and 'employee' (has none).
-  capabilities         TEXT NOT NULL DEFAULT '[]',
+  -- No DEFAULT on the TEXT columns: MySQL < 8.0.13 rejects one (ER_BLOB_CANT_HAVE_DEFAULT);
+  -- upsertEmployee always supplies both values.
+  capabilities         TEXT NOT NULL,
   -- JSON array of "deptId|teamId" strings — extra teams a manager has put this
   -- team lead in charge of, beyond the one they personally belong to
   -- (department_id/team_id above). Only meaningful when role = 'teamlead'.
-  managed_teams        TEXT NOT NULL DEFAULT '[]',
+  managed_teams        TEXT NOT NULL,
   active               TINYINT(1) NOT NULL DEFAULT 1,
   last_login_at        VARCHAR(32),
   created_at           VARCHAR(32) NOT NULL,
