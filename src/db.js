@@ -130,7 +130,11 @@ async function migrateEmployeeCapabilitiesColumn(conn) {
  *  callers (e.g. a Promise.all of several queries) only trigger it once. */
 async function exec(sql, params) {
   const p = getPool();
-  if (!schemaReady) schemaReady = applySchema();
+  if (!schemaReady) {
+    // Clear the memo on failure so a transient DB outage at boot doesn't
+    // poison every later query — the next call retries the schema.
+    schemaReady = applySchema().catch(err => { schemaReady = null; throw err; });
+  }
   await schemaReady;
   return p.execute(sql, params);
 }
