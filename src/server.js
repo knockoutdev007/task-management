@@ -60,8 +60,15 @@ app.use((err, _req, res, _next) => {
 });
 
 app.listen(PORT, async () => {
-  const n = (await listEmployees()).length;
   console.log(`\n  Team Control Center → http://localhost:${PORT}`);
-  if (!n) console.log("  No people yet. Run:  npm run seed\n");
-  else console.log(`  ${n} people in the database.\n`);
+  try {
+    const n = (await listEmployees()).length;
+    if (!n) console.log("  No people yet. Run:  npm run seed\n");
+    else console.log(`  ${n} people in the database.\n`);
+  } catch (err) {
+    // Don't let an unreachable database kill the process (Node 22 exits on
+    // unhandled rejections) — stay up so the platform gateway and logs show
+    // the real cause instead of a bare "Gateway error".
+    console.error("\n  Could not reach the database on startup:", err.message, "\n");
+  }
 });
