@@ -92,12 +92,14 @@ async function migrateTaskBoardColumns(conn) {
  *  single-column CHECK differently. A server old enough to not enforce CHECK
  *  at all (see schema.sql's own note) has nothing here to widen — harmless.
  *
- *  `ALTER TABLE ... DROP CONSTRAINT <name>` on the auto-named inline CHECK
- *  fails on MariaDB (ER_CANT_DROP_FIELD_OR_KEY — it looks for an index/key
- *  of that name first, not a CHECK) even though the constraint is real and
- *  enforced; `MODIFY COLUMN` without a CHECK clause silently drops the old
- *  inline one instead, then a fresh named CHECK is added — this works on
- *  both MySQL 8+ and MariaDB 10.2.1+. */
+ *  How the old CHECK is dropped depends on the server: MySQL 8.0.16+ needs
+ *  `DROP CHECK <name>` (a plain `MODIFY COLUMN` leaves the old constraint in
+ *  place, so re-adding one with the same name fails with
+ *  ER_CHECK_CONSTRAINT_DUP_NAME and the old two-value rule keeps rejecting
+ *  'teamlead'); MariaDB rejects DROP CHECK/DROP CONSTRAINT on the auto-named
+ *  inline CHECK (ER_CANT_DROP_FIELD_OR_KEY) but silently drops it on
+ *  `MODIFY COLUMN` without a CHECK clause. Try each in turn, then add the
+ *  widened rule under a fresh name so it can never collide with the old one. */
 async function migrateEmployeeRoleCheck(conn) {
   const [rows] = await conn.query(`
     SELECT tc.CONSTRAINT_NAME, cc.CHECK_CLAUSE
@@ -108,8 +110,18 @@ async function migrateEmployeeRoleCheck(conn) {
   `);
   const roleConstraint = rows.find(r => /\brole\b/i.test(r.CHECK_CLAUSE) && /manager/i.test(r.CHECK_CLAUSE));
   if (roleConstraint && !/teamlead/i.test(roleConstraint.CHECK_CLAUSE)) {
-    await conn.query("ALTER TABLE employees MODIFY COLUMN role VARCHAR(16) NOT NULL DEFAULT 'employee'");
-    await conn.query("ALTER TABLE employees ADD CONSTRAINT `role` CHECK (role IN ('manager','employee','teamlead'))");
+    const name = roleConstraint.CONSTRAINT_NAME.replace(/`/g, "``");
+    const drops = [
+      `ALTER TABLE employees DROP CHECK \`${name}\``,
+      `ALTER TABLE employees DROP CONSTRAINT \`${name}\``,
+      "ALTER TABLE employees MODIFY COLUMN role VARCHAR(16) NOT NULL DEFAULT 'employee'"
+    ];
+    let lastErr = null, dropped = false;
+    for (const sql of drops) {
+      try { await conn.query(sql); dropped = true; break; } catch (err) { lastErr = err; }
+    }
+    if (!dropped) throw lastErr;
+    await conn.query("ALTER TABLE employees ADD CONSTRAINT `employees_role_chk` CHECK (role IN ('manager','employee','teamlead'))");
   }
 }
 
