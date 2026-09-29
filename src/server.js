@@ -48,7 +48,14 @@ mountGoodVibes(app, requireUser, requireManager, requireManagerOrTeamLead);
 mountComplaints(app, requireUser, requireManager);
 mountWebsite(app, requireUser, requireManager);
 
-app.get("/api/health", wrap(async (_req, res) => res.json({ ok: true, people: (await listEmployees()).length })));
+app.get("/api/health", async (_req, res) => {
+  try { res.json({ ok: true, people: (await listEmployees()).length }); }
+  catch (err) {
+    console.error("Health check failed:", err);
+    // Error code only (e.g. ECONNREFUSED, ER_ACCESS_DENIED_ERROR) — no message, host or credentials.
+    res.status(503).json({ ok: false, dbError: err.code || err.name || "UNKNOWN" });
+  }
+});
 
 app.use(express.static(PUBLIC, { index: "index.html", maxAge: process.env.NODE_ENV === "production" ? "1h" : 0 }));
 app.get("/api/*", (_req, res) => res.status(404).json({ error: "No such endpoint." }));
