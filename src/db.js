@@ -121,8 +121,11 @@ async function migrateEmployeeCapabilitiesColumn(conn) {
     "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'employees'"
   );
   const names = new Set(cols.map(c => c.COLUMN_NAME));
-  if (!names.has("capabilities")) await conn.query("ALTER TABLE employees ADD COLUMN capabilities TEXT NOT NULL DEFAULT '[]'");
-  if (!names.has("managed_teams")) await conn.query("ALTER TABLE employees ADD COLUMN managed_teams TEXT NOT NULL DEFAULT '[]'");
+  if (!names.has("capabilities")) await conn.query("ALTER TABLE employees ADD COLUMN capabilities TEXT NOT NULL");
+  if (!names.has("managed_teams")) await conn.query("ALTER TABLE employees ADD COLUMN managed_teams TEXT NOT NULL");
+  // TEXT can't carry a DEFAULT on MySQL < 8.0.13, so backfill rows the ALTER left empty.
+  await conn.query("UPDATE employees SET capabilities = '[]' WHERE capabilities = ''");
+  await conn.query("UPDATE employees SET managed_teams = '[]' WHERE managed_teams = ''");
 }
 
 /** Every exported function funnels through this — ensures the pool exists and
